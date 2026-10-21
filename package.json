@@ -1,6 +1,6 @@
 {
   "name": "pulsebet-studio",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Institutional-grade live football telemetry, in-play momentum radar & quantitative value betting terminal.",
   "main": "src/server.js",
   "repository": {

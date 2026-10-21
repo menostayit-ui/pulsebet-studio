@@ -277,7 +277,7 @@ class FlashscoreScraper {
           } else if (stageRaw === 13) {
             statusText = '2. Yarı';
             if (bxMin >= 45 && bxMin <= 105) {
-              minute = bxMin;
+              minute = Math.max(46, bxMin);
             } else if (periodStartTs > 0 && nowSec >= periodStartTs && (nowSec - periodStartTs) <= 4200) {
               minute = Math.max(46, Math.min(94, 45 + Math.floor((nowSec - periodStartTs) / 60) + 1));
             } else if (startTs > 0 && nowSec > startTs) {
@@ -285,7 +285,7 @@ class FlashscoreScraper {
               const elapsedTotal = Math.floor((nowSec - startTs) / 60);
               minute = Math.max(46, Math.min(94, elapsedTotal - 17));
             } else {
-              minute = 90;
+              minute = 46;
             }
           } else if (stageRaw === 6 || stageRaw === 7) {
             statusText = 'Uzatma';

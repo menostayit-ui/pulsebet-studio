@@ -13,6 +13,32 @@ const MODERN_USER_AGENTS = [
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15'
 ];
 
+const ESPN_LEAGUE_SLUG_MAP = {
+  'uefa.champions': 'UEFA Şampiyonlar Ligi',
+  'uefa.europa': 'UEFA Avrupa Ligi',
+  'uefa.europa.conf': 'UEFA Konferans Ligi',
+  'eng.1': 'Premier League',
+  'esp.1': 'LaLiga',
+  'ita.1': 'Serie A',
+  'ger.1': 'Bundesliga',
+  'fra.1': 'Ligue 1',
+  'tur.1': 'Trendyol Süper Lig',
+  'por.1': 'Liga Portugal',
+  'ned.1': 'Eredivisie',
+  'bra.1': 'Brasileirão Serie A',
+  'sau.1': 'Saudi Pro League',
+  'usa.1': 'Major League Soccer',
+  'eng.2': 'Championship',
+  'eng.fa': 'FA Cup',
+  'esp.copa_del_rey': 'Copa del Rey',
+  'ger.dfb_pokal': 'DFB-Pokal',
+  'ita.coppa_italia': 'Coppa Italia',
+  'fra.coupe_de_france': 'Coupe de France',
+  'tur.cup': 'Ziraat Türkiye Kupası',
+  'fifa.world': 'FIFA Dünya Kupası',
+  'uefa.euro': 'Avrupa Futbol Şampiyonası'
+};
+
 class EspnScraper {
   constructor() {
     this.baseUrl = 'https://site.api.espn.com/apis/site/v2/sports/soccer/all';
@@ -107,7 +133,10 @@ class EspnScraper {
     const oddsList = comp.odds || (Array.isArray(comp) ? comp : []);
     if (!Array.isArray(oddsList) || oddsList.length === 0) return null;
 
-    const consensus = oddsList.find(o => String(o.provider?.name || '').toLowerCase().includes('consensus')) || oddsList[0];
+    const validOdds = oddsList.filter(o => o && typeof o === 'object');
+    if (validOdds.length === 0) return null;
+
+    const consensus = validOdds.find(o => String(o?.provider?.name || '').toLowerCase().includes('consensus')) || validOdds[0];
     if (!consensus) return null;
 
     const parsed = {
@@ -195,14 +224,19 @@ class EspnScraper {
       let minute = 0;
 
       if (state === 'in') {
-        if (shortDetail.toLowerCase().includes('ht') || shortDetail.toLowerCase().includes('halftime')) {
+        const isHalftime =
+          shortDetail.toLowerCase() === 'ht' ||
+          shortDetail.toLowerCase() === 'halftime' ||
+          shortDetail.toLowerCase().includes('half time') ||
+          (stType.description || '').toLowerCase().includes('halftime');
+        if (isHalftime) {
           status = 'HT';
           statusText = 'Devre Arası';
           minute = 45;
         } else {
           status = 'LIVE';
           minute = Math.max(1, rawMin);
-          statusText = minute <= 45 ? '1. Yarı' : '2. Yarı';
+          statusText = minute <= 45 ? '1. Yarı' : (minute >= 90 ? 'Uzatma' : '2. Yarı');
         }
       } else if (state === 'post') {
         status = 'FT';
@@ -210,7 +244,20 @@ class EspnScraper {
         minute = 90;
       }
 
-      const leagueName = ev.league?.name || data.leagues?.[0]?.name || 'Uluslararası Futbol';
+      let leagueName = ev.league?.name || data.leagues?.[0]?.name;
+      if (!leagueName || leagueName === 'Uluslararası Futbol' || leagueName === 'Soccer') {
+        for (const link of (ev.links || [])) {
+          const m = link.href?.match(/\/league\/([a-zA-Z0-9._-]+)/);
+          if (m && ESPN_LEAGUE_SLUG_MAP[m[1]]) {
+            leagueName = ESPN_LEAGUE_SLUG_MAP[m[1]];
+            break;
+          } else if (m && m[1]) {
+            leagueName = m[1].replace(/\./g, ' ').toUpperCase();
+            break;
+          }
+        }
+      }
+      if (!leagueName) leagueName = 'Uluslararası Futbol';
 
       // Extract inline statistics if provided on scoreboard competitor
       const extractInlineStats = (compObj) => {

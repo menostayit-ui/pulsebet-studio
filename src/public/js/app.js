@@ -808,7 +808,8 @@
       if (isUpcoming) stageEl.textContent = t('filter_scheduled', 'YAKLAŞAN').toUpperCase();
       else if (match.status === 'HT') stageEl.textContent = t('minute_ht', 'DEVRE ARASI');
       else if ((match.minute || 0) >= 90) stageEl.textContent = t('minute_extra', 'UZATMALAR');
-      else stageEl.textContent = `${t('minute_live', 'CANLI')} ${t('btn_matches', 'MAÇ').toUpperCase()}`;
+      else if ((match.minute || 0) >= 46) stageEl.textContent = `${t('stage_2nd_half', '2. YARI')} · ${t('minute_live', 'CANLI')}`;
+      else stageEl.textContent = `${t('stage_1st_half', '1. YARI')} · ${t('minute_live', 'CANLI')}`;
     }
 
     const statusPill = document.getElementById('heroSignalStatusPill');
@@ -1500,7 +1501,7 @@
     const grid = document.getElementById('radarBentoGrid');
     const pill = document.getElementById('radarViewCountPill');
     const signalMatches = state.matches.filter(m =>
-      m.status === 'LIVE' &&
+      (m.status === 'LIVE' || m.status === 'HT') &&
       (isMatchValidForSignalNotif(m) || ((m.minute || 0) < 75 && m.analysis?.quant?.signalStatus === 'WATCHLIST'))
     );
     const activeCount = state.matches.filter(m => isMatchValidForSignalNotif(m)).length;

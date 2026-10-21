@@ -209,7 +209,7 @@ class Scores365Scraper {
       const rawShort = String(g.shortStatusText || g.statusText || '').toLowerCase();
       let minute = g.gameTime && g.gameTime > 0 ? Math.round(g.gameTime) : 0;
 
-      if (rawShort.includes('post') || rawShort.includes('canc') || rawShort.includes('aban') || rawShort.includes('susp')) {
+      if (rawShort.includes('post') || rawShort.includes('canc') || rawShort.includes('aban') || rawShort.includes('susp') || rawShort.includes('delay')) {
         status = 'POSTPONED';
         statusText = 'Ertelendi';
       } else if (g.statusGroup === 4 || rawShort === 'fro' || rawShort === 'ft' || rawShort === 'ended' || rawShort === 'aet' || rawShort === 'pen') {
@@ -217,13 +217,26 @@ class Scores365Scraper {
         statusText = 'Maç Sonu';
         minute = 90;
       } else if (g.statusGroup === 3) {
-        status = (rawShort.includes('ht') || rawShort.includes('half')) ? 'HT' : 'LIVE';
-        if (status === 'HT') {
+        const isHalftime =
+          rawShort === 'ht' ||
+          rawShort === 'halftime' ||
+          rawShort.includes('half time') ||
+          rawShort.includes('devre arası') ||
+          (rawShort.includes('ht') && !rawShort.includes('2nd') && !rawShort.includes('1st'));
+
+        if (isHalftime) {
+          status = 'HT';
           statusText = 'Devre Arası';
           minute = 45;
         } else {
-          if (minute <= 0) minute = 1;
-          statusText = minute <= 45 ? '1. Yarı' : '2. Yarı';
+          status = 'LIVE';
+          if (rawShort.includes('2nd') || rawShort.includes('2. yarı') || (minute > 45 && minute <= 125)) {
+            minute = Math.max(46, Math.min(125, minute || 46));
+            statusText = minute >= 90 ? 'Uzatma' : '2. Yarı';
+          } else {
+            if (minute <= 0) minute = 1;
+            statusText = '1. Yarı';
+          }
         }
       }
 

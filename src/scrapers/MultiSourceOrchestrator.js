@@ -1017,35 +1017,61 @@ class MultiSourceOrchestrator {
         }
       }
 
-      // Status transition
+      // =========================================================================
+      // INSTITUTIONAL FOOTBALL STATE ARBITER & MONOTONIC CLOCK
+      // Guarantees clean progression: SCHEDULED -> 1st Half -> HT -> 2nd Half -> FT
+      // Eliminates sticky half-time and prevents lagging feeds from pulling 2nd half back to HT
+      // =========================================================================
+      const isIncoming2ndHalf =
+        (raw.status === 'LIVE' && raw.minute >= 46) ||
+        (String(raw.statusText || '').toLowerCase().includes('2. yarı')) ||
+        (String(raw.statusText || '').toLowerCase().includes('2nd half'));
+
+      const isCanonical2ndHalf =
+        (canonical.status === 'LIVE' && (canonical.minute || 0) >= 46) ||
+        (String(canonical.statusText || '').toLowerCase().includes('2. yarı'));
+
       if (raw.status === 'FT' || raw.status === 'POSTPONED') {
         canonical.status = raw.status;
         canonical.statusText = raw.statusText || (raw.status === 'FT' ? 'Maç Sonu' : 'Ertelendi');
         if (raw.status === 'FT') canonical.minute = 90;
       } else if (canonical.status !== 'FT' && canonical.status !== 'POSTPONED') {
-        if (raw.status === 'LIVE' || raw.status === 'HT') {
-          canonical.status = raw.status;
-          canonical.statusText = raw.statusText;
+        if (isCanonical2ndHalf || isIncoming2ndHalf) {
+          // 1. SECOND HALF IN PLAY (Minute >= 46'):
+          // Strictly LIVE, never HT. Lagging feeds still reporting HT are strictly blocked from regressing the match.
+          canonical.status = 'LIVE';
+          const safeMin = Math.min(125, Math.max(46, raw.minute > 0 ? raw.minute : (canonical.minute || 46)));
+          if (
+            raw.source === '365scores' ||
+            raw.source === 'espn' ||
+            !canonical.minute ||
+            safeMin > (canonical.minute || 0)
+          ) {
+            canonical.minute = safeMin;
+          }
+          canonical.statusText = (canonical.minute >= 90) ? 'Uzatma' : '2. Yarı';
+        } else if (raw.status === 'HT' || canonical.status === 'HT') {
+          // 2. HALF-TIME BREAK (Minute 45'):
+          // If any authoritative source reports HT, lock to HT until active 2nd half play kicks off.
+          canonical.status = 'HT';
+          canonical.statusText = 'Devre Arası';
+          canonical.minute = 45;
+        } else if (raw.status === 'LIVE') {
+          // 3. FIRST HALF IN PLAY (Minute 1' - 45'):
+          canonical.status = 'LIVE';
+          const safeMin = Math.min(45, Math.max(1, raw.minute > 0 ? raw.minute : (canonical.minute || 1)));
+          if (
+            raw.source === '365scores' ||
+            raw.source === 'espn' ||
+            !canonical.minute ||
+            safeMin > (canonical.minute || 0)
+          ) {
+            canonical.minute = safeMin;
+          }
+          canonical.statusText = '1. Yarı';
         } else if (canonical.status === 'SCHEDULED') {
-          canonical.statusText = canonical.kickoffTime || raw.statusText;
-        }
-      }
-
-      // Accurate minute resolution: prioritize 365Scores/ESPN direct referee clock, avoid stuck minutes
-      if (canonical.status === 'FT') {
-        canonical.minute = 90;
-      } else if (canonical.status === 'HT') {
-        canonical.minute = 45;
-      } else if (raw.status === 'LIVE' && raw.minute > 0) {
-        const safeMin = Math.min(125, raw.minute);
-        if (
-          raw.source === '365scores' ||
-          raw.source === 'espn' ||
-          !canonical.minute ||
-          Math.abs(safeMin - canonical.minute) <= 5 ||
-          (safeMin > canonical.minute && safeMin <= 125)
-        ) {
-          canonical.minute = safeMin;
+          canonical.statusText = canonical.kickoffTime || raw.statusText || '00:00';
+          canonical.minute = 0;
         }
       }
 
