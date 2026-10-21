@@ -1,19 +1,19 @@
 {
   "name": "pulsebet-studio",
   "version": "1.0.0",
-  "description": "PulseBet Studio — Real-Time Football Momentum & Quantitative Live Betting Analytics Terminal",
+  "description": "Institutional-grade live football telemetry, in-play momentum radar & quantitative value betting terminal.",
   "main": "src/server.js",
-  "scripts": {
-    "start": "node src/server.js"
-  },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/menostayit-ui/pulsebet-studio.git"
+    "url": "https://github.com/menostayit-ui/pulsebet-studio.git"
   },
+  "homepage": "https://github.com/menostayit-ui/pulsebet-studio#readme",
   "bugs": {
     "url": "https://github.com/menostayit-ui/pulsebet-studio/issues"
   },
-  "homepage": "https://github.com/menostayit-ui/pulsebet-studio#readme",
+  "scripts": {
+    "start": "node src/server.js"
+  },
   "keywords": [
     "football",
     "soccer",
@@ -23,10 +23,9 @@
     "quantitative-finance",
     "dixon-coles",
     "poisson-model",
-    "sports-betting",
-    "real-time",
-    "websocket",
-    "value-betting"
+    "expected-goals",
+    "in-play-trading",
+    "websocket"
   ],
   "author": "menostayit-ui",
   "license": "MIT",
