@@ -1,0 +1,30 @@
+name: Feature Request / Quant Model Proposal
+description: Suggest an idea, algorithm enhancement, or data source for PulseBet Studio
+title: "[FEAT]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        We welcome proposals for new mathematical models, data feed scrapers, and UI capabilities.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or Analytical Opportunity
+      description: Is your feature request related to a specific analytical edge, missing market line, or metric?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution / Methodology
+      description: Describe the mathematical formulation, algorithmic logic, or UX design.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Any alternative implementations or existing tools you've looked into?
+    validations:
+      false
