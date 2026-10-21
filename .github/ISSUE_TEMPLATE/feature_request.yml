@@ -27,4 +27,4 @@ body:
       label: Alternatives Considered
       description: Any alternative implementations or existing tools you've looked into?
     validations:
-      false
+      required: false
