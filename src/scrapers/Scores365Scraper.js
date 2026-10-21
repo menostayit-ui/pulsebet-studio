@@ -307,6 +307,19 @@ class Scores365Scraper {
         const id = item.id;
         const name = (item.name || '').toLowerCase();
 
+        const isYellowCardStat = (n, statId) => {
+          if (statId === 1 && (n.includes('card') || n.includes('kart') || !n)) return true;
+          return n === 'yellowcard' || n === 'yellowcards' || n === 'yellow_card' || n === 'yellow_cards' ||
+                 n === 'yellow cards' || n === 'yellow card' || n.includes('yellow card') || n.includes('yellow_card') ||
+                 n.includes('sarı kart') || n.includes('sari kart') || (n.includes('yellow') && (n.includes('card') || n.includes('kart')));
+        };
+        const isRedCardStat = (n, statId) => {
+          if (statId === 2 && (n.includes('card') || n.includes('kart') || !n)) return true;
+          return n === 'redcard' || n === 'redcards' || n === 'red_card' || n === 'red_cards' ||
+                 n === 'red cards' || n === 'red card' || n.includes('red card') || n.includes('red_card') ||
+                 n.includes('kırmızı kart') || n.includes('kirmizi kart') || (n.includes('red') && (n.includes('card') || n.includes('kart')));
+        };
+
         if (id === 10 || name.includes('possession')) stats[side].possession = val;
         else if (id === 3 || name === 'shots' || name.includes('total shot')) stats[side].totalShots = val;
         else if (id === 4 || name.includes('shots on target') || name.includes('shots on goal')) stats[side].shotsOnTarget = val;
@@ -316,8 +329,8 @@ class Scores365Scraper {
         else if (id === 17 || name.includes('shots outside') || name.includes('outside box')) stats[side].shotsOutsideBox = val;
         else if (id === 8 || name.includes('corner')) stats[side].corners = val;
         else if (id === 12 || name.includes('foul')) stats[side].fouls = val;
-        else if (id === 1 || name.includes('yellow')) stats[side].yellowCards = val;
-        else if (id === 2 || name.includes('red')) stats[side].redCards = val;
+        else if (isYellowCardStat(name, id)) stats[side].yellowCards = val;
+        else if (isRedCardStat(name, id)) stats[side].redCards = val;
         else if (id === 9 || name.includes('offside')) stats[side].offsides = val;
         else if (id === 13 || name.includes('free kick') || name.includes('freekick')) stats[side].freeKicks = val;
         else if (id === 7 || name.includes('save')) {
@@ -366,6 +379,21 @@ class Scores365Scraper {
     }
   }
 
+  async fetchGameDetails(gameId, homeCompId, awayCompId) {
+    try {
+      const url = `${this.baseUrl}/game/?appTypeId=5&langId=1&timezoneName=Europe/Istanbul&userCountryId=21&gameId=${gameId}&_t=${Date.now()}`;
+      const res = await this.fetchWithRetry(url);
+      const data = await res.json();
+      const g = data?.game || data;
+      const odds = this.parseGameOdds(g);
+      const rawEvents = data?.game?.events || data?.events || [];
+      const incidents = this.parseIncidents(rawEvents, gameId, homeCompId, awayCompId);
+      return { odds, incidents };
+    } catch (_) {
+      return { odds: null, incidents: [] };
+    }
+  }
+
   async fetchMatchOdds(gameId) {
     try {
       const url = `${this.baseUrl}/game/?appTypeId=5&langId=1&timezoneName=Europe/Istanbul&userCountryId=21&gameId=${gameId}&_t=${Date.now()}`;
@@ -384,93 +412,118 @@ class Scores365Scraper {
       const res = await this.fetchWithRetry(url);
       const data = await res.json();
       const rawEvents = data?.game?.events || data?.events || [];
-      if (!Array.isArray(rawEvents) || rawEvents.length === 0) return [];
-
-      const incidents = [];
-
-      for (const ev of rawEvents) {
-        const side = (String(ev.competitorId) === String(homeCompId)) ? 'HOME'
-          : ((String(ev.competitorId) === String(awayCompId)) ? 'AWAY' : 'HOME');
-
-        const min = Math.round(ev.gameTime || ev.minute || ev.time || 0);
-        const addedTime = parseInt(ev.addedTime || ev.extraTime || '0', 10) || 0;
-        const eventTypeNum = ev.eventType?.id || ev.eventTypeNum || ev.eventTypeId || ev.typeId || 0;
-        const eventTypeName = String(ev.eventType?.name || ev.eventTypeDescription || ev.typeName || ev.name || '').toLowerCase();
-
-        let eventType = 'OTHER';
-        if (eventTypeName.includes('disallowed') || eventTypeName.includes('var') || eventTypeName.includes('iptal')) {
-          eventType = 'GOAL_DISALLOWED';
-        } else if (eventTypeNum === 1 || eventTypeNum === 2 || eventTypeNum === 3 || eventTypeName.includes('goal') || eventTypeName.includes('gol')) {
-          eventType = 'GOAL';
-        } else if (eventTypeNum === 4 || eventTypeName.includes('yellow') || eventTypeName.includes('sarı')) {
-          eventType = 'YELLOW_CARD';
-        } else if (eventTypeNum === 5 || eventTypeName.includes('red') || eventTypeName.includes('kırmızı')) {
-          eventType = 'RED_CARD';
-        } else if (eventTypeNum === 7 || eventTypeNum === 6 || eventTypeName.includes('sub') || eventTypeName.includes('değişiklik')) {
-          eventType = 'SUBSTITUTION';
-        }
-
-        const isSub = eventType === 'SUBSTITUTION';
-        let playerIn = ev.playerIn?.name || ev.subIn?.name || null;
-        let playerOut = ev.playerOut?.name || ev.subOut?.name || null;
-        let playerInId = ev.playerIn?.id || ev.subIn?.id || null;
-        let playerOutId = ev.playerOut?.id || ev.subOut?.id || null;
-
-        if (isSub && !playerIn && !playerOut) {
-          if (Array.isArray(ev.extraPlayers) && ev.extraPlayers.length > 0) {
-            const p1 = ev.player?.name || ev.playerName || '';
-            const p2 = ev.extraPlayers[0]?.name || '';
-            const p1Id = ev.player?.id || ev.playerId || null;
-            const p2Id = ev.extraPlayers[0]?.id || null;
-            const subTypeStr = String(ev.subType || ev.eventTypeDescription || '').toLowerCase();
-            if (subTypeStr.includes('in') && !subTypeStr.includes('out')) {
-              playerIn = p1; playerInId = p1Id;
-              playerOut = p2; playerOutId = p2Id;
-            } else {
-              playerIn = p2 || p1; playerInId = p2Id || p1Id;
-              playerOut = p1; playerOutId = p1Id;
-            }
-          } else if (Array.isArray(ev.playersInvolved)) {
-            const inP = ev.playersInvolved.find(p => p.type === 'in' || p.subType === 'in');
-            const outP = ev.playersInvolved.find(p => p.type === 'out' || p.subType === 'out');
-            playerIn = inP?.name || ev.playersInvolved[0]?.name || '';
-            playerInId = inP?.id || ev.playersInvolved[0]?.id || null;
-            playerOut = outP?.name || ev.playersInvolved[1]?.name || null;
-            playerOutId = outP?.id || ev.playersInvolved[1]?.id || null;
-          } else {
-            playerIn = ev.player?.name || ev.playerName || '';
-            playerInId = ev.player?.id || ev.playerId || null;
-          }
-        }
-
-        const primaryName = isSub ? (playerIn || '') : (ev.player?.name || ev.playerName || '');
-        const primaryId = isSub ? (playerInId || null) : (ev.player?.id || ev.playerId || null);
-
-        incidents.push({
-          id: `s365_inc_${gameId}_${ev.id || `${min}_${eventType}_${primaryName}`}`,
-          eventType,
-          minute: min,
-          addedTime,
-          team: side,
-          playerName: primaryName,
-          playerId: primaryId,
-          assistPlayerName: ev.assistPlayer?.name || ev.assistName || null,
-          playerIn: isSub ? (playerIn || primaryName) : null,
-          playerOut: isSub ? playerOut : null,
-          playerInId: isSub ? (playerInId || primaryId) : null,
-          playerOutId: isSub ? playerOutId : null,
-          subIn: isSub ? (playerIn || primaryName) : null,
-          subOut: isSub ? playerOut : null,
-          reason: isSub ? 'Oyuncu Değişikliği' : (ev.reason || ''),
-          homeScore: ev.homeScore !== undefined ? ev.homeScore : null,
-          awayScore: ev.awayScore !== undefined ? ev.awayScore : null
-        });
-      }
-
-      return incidents;
+      return this.parseIncidents(rawEvents, gameId, homeCompId, awayCompId);
     } catch (_) {
       return [];
     }
+  }
+
+  parseIncidents(rawEvents, gameId, homeCompId, awayCompId) {
+    if (!Array.isArray(rawEvents) || rawEvents.length === 0) return [];
+
+    const incidents = [];
+
+    for (const ev of rawEvents) {
+      const side = (String(ev.competitorId) === String(homeCompId)) ? 'HOME'
+        : ((String(ev.competitorId) === String(awayCompId)) ? 'AWAY' : 'HOME');
+
+      const min = Math.round(ev.gameTime || ev.minute || ev.time || 0);
+      const addedTime = parseInt(ev.addedTime || ev.extraTime || '0', 10) || 0;
+      const eventTypeNum = ev.eventType?.id || ev.eventTypeNum || ev.eventTypeId || ev.typeId || 0;
+      const eventTypeName = String(ev.eventType?.name || ev.eventTypeDescription || ev.typeName || ev.name || '').toLowerCase();
+      const reasonStr = String(ev.reason || ev.eventTypeDescription || '').toLowerCase();
+      const fullEventText = `${eventTypeName} ${reasonStr}`;
+
+      const isDisallowedWord =
+        fullEventText.includes('disallowed') ||
+        fullEventText.includes('overturned') ||
+        fullEventText.includes('no goal') ||
+        fullEventText.includes('iptal edildi') ||
+        fullEventText.includes('gol iptal') ||
+        fullEventText.includes('goal cancelled') ||
+        fullEventText.includes('goal canceled');
+
+      const isConfirmedWord =
+        fullEventText.includes('confirmed') ||
+        fullEventText.includes('awarded') ||
+        fullEventText.includes('stands') ||
+        fullEventText.includes('valid') ||
+        fullEventText.includes('onaylandı') ||
+        fullEventText.includes('onaylandi') ||
+        fullEventText.includes('geçerli') ||
+        fullEventText.includes('gecerli');
+
+      let eventType = 'OTHER';
+      if (isDisallowedWord && !isConfirmedWord) {
+        eventType = 'GOAL_DISALLOWED';
+      } else if (eventTypeNum === 1 || eventTypeNum === 2 || eventTypeNum === 3 || eventTypeName.includes('goal') || eventTypeName.includes('gol')) {
+        eventType = 'GOAL';
+      } else if (eventTypeNum === 4 || eventTypeName.includes('yellow card') || eventTypeName.includes('sarı kart') || (eventTypeName.includes('yellow') && eventTypeName.includes('card'))) {
+        eventType = 'YELLOW_CARD';
+      } else if (eventTypeNum === 5 || eventTypeName.includes('red card') || eventTypeName.includes('kırmızı kart') || (eventTypeName.includes('red') && eventTypeName.includes('card'))) {
+        eventType = 'RED_CARD';
+      } else if (eventTypeNum === 7 || eventTypeNum === 6 || eventTypeName.includes('sub') || eventTypeName.includes('değişiklik')) {
+        eventType = 'SUBSTITUTION';
+      }
+
+      const isSub = eventType === 'SUBSTITUTION';
+      let playerIn = ev.playerIn?.name || ev.subIn?.name || null;
+      let playerOut = ev.playerOut?.name || ev.subOut?.name || null;
+      let playerInId = ev.playerIn?.id || ev.subIn?.id || null;
+      let playerOutId = ev.playerOut?.id || ev.subOut?.id || null;
+
+      if (isSub && !playerIn && !playerOut) {
+        if (Array.isArray(ev.extraPlayers) && ev.extraPlayers.length > 0) {
+          const p1 = ev.player?.name || ev.playerName || '';
+          const p2 = ev.extraPlayers[0]?.name || '';
+          const p1Id = ev.player?.id || ev.playerId || null;
+          const p2Id = ev.extraPlayers[0]?.id || null;
+          const subTypeStr = String(ev.subType || ev.eventTypeDescription || '').toLowerCase();
+          if (subTypeStr.includes('in') && !subTypeStr.includes('out')) {
+            playerIn = p1; playerInId = p1Id;
+            playerOut = p2; playerOutId = p2Id;
+          } else {
+            playerIn = p2 || p1; playerInId = p2Id || p1Id;
+            playerOut = p1; playerOutId = p1Id;
+          }
+        } else if (Array.isArray(ev.playersInvolved)) {
+          const inP = ev.playersInvolved.find(p => p.type === 'in' || p.subType === 'in');
+          const outP = ev.playersInvolved.find(p => p.type === 'out' || p.subType === 'out');
+          playerIn = inP?.name || ev.playersInvolved[0]?.name || '';
+          playerInId = inP?.id || ev.playersInvolved[0]?.id || null;
+          playerOut = outP?.name || ev.playersInvolved[1]?.name || null;
+          playerOutId = outP?.id || ev.playersInvolved[1]?.id || null;
+        } else {
+          playerIn = ev.player?.name || ev.playerName || '';
+          playerInId = ev.player?.id || ev.playerId || null;
+        }
+      }
+
+      const primaryName = isSub ? (playerIn || '') : (ev.player?.name || ev.playerName || '');
+      const primaryId = isSub ? (playerInId || null) : (ev.player?.id || ev.playerId || null);
+
+      incidents.push({
+        id: `s365_inc_${gameId}_${ev.id || `${min}_${eventType}_${primaryName}`}`,
+        eventType,
+        minute: min,
+        addedTime,
+        team: side,
+        playerName: primaryName,
+        playerId: primaryId,
+        assistPlayerName: ev.assistPlayer?.name || ev.assistName || null,
+        playerIn: isSub ? (playerIn || primaryName) : null,
+        playerOut: isSub ? playerOut : null,
+        playerInId: isSub ? (playerInId || primaryId) : null,
+        playerOutId: isSub ? playerOutId : null,
+        subIn: isSub ? (playerIn || primaryName) : null,
+        subOut: isSub ? playerOut : null,
+        reason: isSub ? 'Oyuncu Değişikliği' : (ev.reason || ''),
+        homeScore: ev.homeScore !== undefined ? ev.homeScore : null,
+        awayScore: ev.awayScore !== undefined ? ev.awayScore : null
+      });
+    }
+
+    return incidents;
   }
 }
 

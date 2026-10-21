@@ -433,6 +433,7 @@ class FlashscoreScraper {
         fullText.includes('overturned') ||
         fullText.includes('no goal') ||
         fullText.includes('iptal edildi') ||
+        fullText.includes('gol iptal') ||
         fullText.includes('goal cancelled') ||
         fullText.includes('goal canceled');
 
@@ -451,11 +452,11 @@ class FlashscoreScraper {
         eventType = 'GOAL_DISALLOWED';
       } else if (labelLower.includes('goal') || labelLower.includes('gol') || primary.typeCode === '3' || primary.typeCode === '4') {
         eventType = 'GOAL';
-      } else if (labelLower.includes('yellow') || labelLower.includes('sarı') || primary.typeCode === '1') {
+      } else if (primary.typeCode === '1' || labelLower.includes('yellow card') || labelLower.includes('sarı kart') || (labelLower.includes('yellow') && labelLower.includes('card'))) {
         eventType = 'YELLOW_CARD';
-      } else if (labelLower.includes('red') || labelLower.includes('kırmızı') || primary.typeCode === '2') {
+      } else if (primary.typeCode === '2' || labelLower.includes('red card') || labelLower.includes('kırmızı kart') || (labelLower.includes('red') && labelLower.includes('card'))) {
         eventType = 'RED_CARD';
-      } else if (labelLower.includes('substitution') || primary.typeCode === '6' || primary.typeCode === '7') {
+      } else if (labelLower.includes('substitution') || labelLower.includes('değişiklik') || primary.typeCode === '6' || primary.typeCode === '7') {
         eventType = 'SUBSTITUTION';
       }
 

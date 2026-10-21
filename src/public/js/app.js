@@ -12,6 +12,18 @@
   function t(key, fallback = '') {
     return window.pulseI18n ? window.pulseI18n.t(key, fallback) : (fallback || key);
   }
+  function tMarket(title) {
+    return window.pulseI18n ? window.pulseI18n.translateMarketTitle(title) : (title || '');
+  }
+  function tSelection(sel) {
+    return window.pulseI18n ? window.pulseI18n.translateSelection(sel) : (sel || '');
+  }
+  function tArchetype(key, label) {
+    return window.pulseI18n ? window.pulseI18n.translateArchetype(key, label) : (label || '');
+  }
+  function tNarrative(key, trText) {
+    return window.pulseI18n ? window.pulseI18n.translateNarrative(key, trText) : (trText || '');
+  }
 
   const state = {
     matches: [],
@@ -473,15 +485,15 @@
     const triggerLabel = document.getElementById('selectedLeagueLabel');
     const triggerCount = document.getElementById('selectedLeagueCount');
     if (triggerLabel) {
-      triggerLabel.textContent = state.selectedLeague === 'ALL' ? 'Tüm Ligler' : state.selectedLeague;
+      triggerLabel.textContent = state.selectedLeague === 'ALL' ? t('league_all', 'Tüm Ligler') : state.selectedLeague;
     }
     if (triggerCount) {
       triggerCount.textContent = activeCount;
     }
 
-    // 2. Render Popover List filtered by leagueSearchQuery
+    // 2. Render Popover List filtered by leagueSearchQuery ONLY if popover is open
     const listEl = document.getElementById('leaguePickerList');
-    if (listEl) {
+    if (listEl && state.leaguePopoverOpen) {
       const lq = normalizeSearch(state.leagueSearchQuery);
       const filteredLeagues = sortedLeagues.filter(([lg]) => !lq || normalizeSearch(lg).includes(lq));
 
@@ -504,20 +516,28 @@
           </button>
         `)
       ];
-      listEl.innerHTML = rows.join('');
+      const rowsHtml = rows.join('');
+      if (listEl._lastHtml !== rowsHtml) {
+        listEl.innerHTML = rowsHtml;
+        listEl._lastHtml = rowsHtml;
+      }
     }
 
-    // 3. Quick League Pills (top 7 leagues)
+    // 3. Quick League Pills (top 7 leagues) with dirty-check caching
     const pillsEl = document.getElementById('leagueQuickPills');
     if (pillsEl) {
       const topLeagues = sortedLeagues.slice(0, 7);
-      pillsEl.innerHTML = [
+      const pillsHtml = [
         `<button type="button" class="league-pill ${state.selectedLeague === 'ALL' ? 'active' : ''}" data-league="ALL">${t('filter_all', 'Tümü')}</button>`,
         ...topLeagues.map(([lg, st]) => {
           const shortName = lg.length > 18 ? lg.slice(0, 16) + '…' : lg;
           return `<button type="button" class="league-pill ${state.selectedLeague === lg ? 'active' : ''}" data-league="${escapeHtml(lg)}">${escapeHtml(shortName)} (${st.total})</button>`;
         })
       ].join('');
+      if (pillsEl._lastHtml !== pillsHtml) {
+        pillsEl.innerHTML = pillsHtml;
+        pillsEl._lastHtml = pillsHtml;
+      }
     }
   }
 
@@ -694,7 +714,7 @@
     const filtered = getFilteredMatches();
 
     if (filtered.length === 0) {
-      container.innerHTML = `
+      const emptyHtml = `
         <div class="empty-state-card">
           <div class="es-icon">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -702,10 +722,14 @@
               <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
             </svg>
           </div>
-          <h4>Eşleşen Karşılaşma Bulunamadı</h4>
-          <p>Farklı bir lig veya filtre seçimi yapabilirsiniz.</p>
+          <h4>${t('no_matches_found', 'Eşleşen Karşılaşma Bulunamadı')}</h4>
+          <p>${t('no_matches_found_sub', 'Farklı bir lig veya filtre seçimi yapabilirsiniz.')}</p>
         </div>
       `;
+      if (container._lastHtml !== emptyHtml) {
+        container.innerHTML = emptyHtml;
+        container._lastHtml = emptyHtml;
+      }
       return;
     }
 
@@ -722,8 +746,8 @@
       if (state.matchFilter === 'ALL' && upcomingList.length > 0) {
         htmlSections.push(`
           <div class="match-section-divider live-sec">
-            <span>Canlı Karşılaşmalar</span>
-            <span class="msd-count">${liveList.length} Maç</span>
+            <span>${t('sec_live_matches', 'Canlı Karşılaşmalar')}</span>
+            <span class="msd-count">${liveList.length} ${t('count_matches', 'Maç')}</span>
           </div>
         `);
       }
@@ -734,8 +758,8 @@
       if (state.matchFilter === 'ALL') {
         htmlSections.push(`
           <div class="match-section-divider upcoming-sec">
-            <span>Bugünün Yaklaşan Karşılaşmaları</span>
-            <span class="msd-count">${upcomingList.length} Maç</span>
+            <span>${t('sec_upcoming_matches', 'Bugünün Yaklaşan Karşılaşmaları')}</span>
+            <span class="msd-count">${upcomingList.length} ${t('count_matches', 'Maç')}</span>
           </div>
         `);
       }
@@ -744,7 +768,11 @@
       htmlSections.push(sortedUpcoming.map(buildMatchRowCardHtml).join(''));
     }
 
-    container.innerHTML = htmlSections.join('');
+    const newHtml = htmlSections.join('');
+    if (container._lastHtml !== newHtml) {
+      container.innerHTML = newHtml;
+      container._lastHtml = newHtml;
+    }
   }
 
   function computeTeamXg(stats = {}, oppStats = {}, providedXg = null) {
@@ -857,19 +885,26 @@
     }
 
     // Flow Reader & Pressure Momentum Radar
+    const archetypeKey = flow.archetype || 'BALANCED';
+    const rawArchetypeLabel = flow.archetypeLabel || t('tracking_flow', 'Maç Gidişatı İzleniyor');
     document.getElementById('flowArchetypeLabel').textContent = isUpcoming
       ? `${t('prematch_analysis', 'Yaklaşan Maç Önü Analizi')} (${match.kickoffTime || t('today', 'Bugün')})`
-      : cleanBadgeText(flow.archetypeLabel || t('tracking_flow', 'Maç Gidişatı İzleniyor'), t('tracking_flow', 'Maç Gidişatı İzleniyor'));
+      : tArchetype(archetypeKey, cleanBadgeText(rawArchetypeLabel, t('tracking_flow', 'Maç Gidişatı İzleniyor')));
     document.getElementById('flowNarrativeText').textContent = isUpcoming
       ? (quant.signalStatusReason || t('spotlight_prematch_reason', 'Maç henüz başlamadı.'))
-      : (flow.narrative || t('radar_default_narrative', 'Maç içi şut, korner ve tempo değişimleri gerçek zamanlı okunuyor.'));
+      : tNarrative(archetypeKey, flow.narrative || t('radar_default_narrative', 'Maç içi şut, korner ve tempo değişimleri gerçek zamanlı okunuyor.'));
 
     const igpH = isUpcoming ? Math.round((quant.lambdas?.priorH || 1.4) * 35) : (flow.igpHome || 0);
     const igpA = isUpcoming ? Math.round((quant.lambdas?.priorA || 1.1) * 35) : (flow.igpAway || 0);
     const igpSum = Math.max(1, igpH + igpA);
     const pctH = igpH === 0 && igpA === 0 ? 50 : Math.round((igpH / igpSum) * 100);
-    document.getElementById('igpHomeLabel').textContent = `${t('home_pressure', 'Ev Baskısı')} %${pctH}`;
-    document.getElementById('igpAwayLabel').textContent = `${t('away_pressure', 'Dep Baskısı')} %${100 - pctH}`;
+    const isEn = window.pulseI18n && window.pulseI18n.lang === 'en';
+    document.getElementById('igpHomeLabel').textContent = isEn
+      ? `${t('home_pressure', 'Home Pressure')}: ${pctH}%`
+      : `${t('home_pressure', 'Ev Baskısı')}: %${pctH}`;
+    document.getElementById('igpAwayLabel').textContent = isEn
+      ? `${t('away_pressure', 'Away Pressure')}: ${100 - pctH}%`
+      : `${t('away_pressure', 'Dep Baskısı')}: %${100 - pctH}`;
     document.getElementById('igpHomeBar').style.width = `${pctH}%`;
     document.getElementById('igpAwayBar').style.width = `${100 - pctH}%`;
 
@@ -892,9 +927,13 @@
     }
 
     renderSelectiveSignalSpotlight(match, flow, quant);
-    renderMatchStatsMatrix(match, hStats, aStats, flow);
     renderMarketsGrid(match, quant);
-    renderTimelineAndPlayers(match, players);
+    if (state.studioActiveTab === 'stats' || state.studioActiveTab === 'overview') {
+      renderMatchStatsMatrix(match, hStats, aStats, flow);
+    }
+    if (state.studioActiveTab === 'timeline') {
+      renderTimelineAndPlayers(match, players);
+    }
   }
 
   function renderSelectiveSignalSpotlight(match, flow, quant) {
@@ -906,7 +945,7 @@
 
     let html = '';
     if (ledgerEntry && ledgerEntry.settlementStatus === 'WON') {
-      const wonSelection = ledgerEntry.selection || t('valuable_selection', 'Değerli Seçim');
+      const wonSelection = tSelection(ledgerEntry.selection || t('valuable_selection', 'Değerli Seçim'));
       html = `
         <div class="signal-spotlight-card">
           <div class="ss-top">
@@ -931,13 +970,13 @@
           <div class="ss-top">
             <div class="ss-pick-group">
               <span class="ss-badge">${t('spotlight_active_badge', 'SİNYAL AKTİF')}</span>
-              <span class="ss-pick-name">${escapeHtml(p.selection || t('valuable_selection', 'Değerli Seçim'))}</span>
-              <span class="ss-market-label">(${escapeHtml(p.marketTitle || t('tab_markets', 'Market'))})</span>
+              <span class="ss-pick-name">${escapeHtml(tSelection(p.selection || t('valuable_selection', 'Değerli Seçim')))}</span>
+              <span class="ss-market-label">(${escapeHtml(tMarket(p.marketTitle || t('tab_markets', 'Market')))})</span>
             </div>
             <div class="ss-metrics">
               <span class="ss-metric-pill">${t('confidence', 'Güven')}: <b style="color:var(--emerald-bright)">%${p.confidence || 75}</b></span>
               <span class="ss-metric-pill">${t('odds', 'Oran')}: <b>@${p.marketOdds || p.fairOdds || '1.80'}</b></span>
-              ${c ? `<span class="ss-metric-pill">${t('tab_both_header', 'Ek')}: <b>${escapeHtml(c.selection)} (%${c.confidence})</b></span>` : ''}
+              ${c ? `<span class="ss-metric-pill">${t('tab_both_header', 'Ek')}: <b>${escapeHtml(tSelection(c.selection))} (%${c.confidence})</b></span>` : ''}
             </div>
           </div>
           <div class="ss-reason">${escapeHtml(p.reasoning || '')}</div>
@@ -950,7 +989,7 @@
           <div class="ss-top">
             <div class="ss-pick-group">
               <span class="ss-badge" style="background:var(--amber-soft);color:var(--amber)">${t('spotlight_radar_badge', 'RADARDA')} ${t('tracking_flow', 'İZLENİYOR')}</span>
-              <span class="ss-pick-name">${escapeHtml(w.selection || t('valuable_selection', 'Değerli Seçim'))}</span>
+              <span class="ss-pick-name">${escapeHtml(tSelection(w.selection || t('valuable_selection', 'Değerli Seçim')))}</span>
               <span class="ss-market-label">(${t('confidence', 'Güven')}: %${w.confidence || 65})</span>
             </div>
           </div>
@@ -980,8 +1019,14 @@
       `;
     }
 
-    if (box) box.innerHTML = html;
-    if (overviewBox) overviewBox.innerHTML = html;
+    if (box && box._lastHtml !== html) {
+      box.innerHTML = html;
+      box._lastHtml = html;
+    }
+    if (overviewBox && overviewBox._lastHtml !== html) {
+      overviewBox.innerHTML = html;
+      overviewBox._lastHtml = html;
+    }
   }
 
   // ================= UNIFIED FOTMOB & SOFASCORE MATCH STATISTICS MATRIX =================
@@ -1125,13 +1170,14 @@
       return `
         <div class="market-card ${isCompact ? 'compact' : ''} ${isSelectedMarket ? 'triggered' : ''} ${isSettledWon ? 'settled-won' : ''} ${isLocked ? 'locked-market' : ''}">
           <div class="mc-head">
-            <span class="mc-title">${escapeHtml(m.marketTitle)}</span>
+            <span class="mc-title">${escapeHtml(tMarket(m.marketTitle))}</span>
             <span class="mc-tag ${tagClass}">${escapeHtml(tagText)}</span>
           </div>
           <div class="mc-options">
             ${(m.allOptions || []).map(opt => {
               const isBest = !m.closed && (isSelectedMarket || isPreMatch) && (m.selection && m.selection.startsWith(opt.selection));
               const probVal = Math.max(1, Math.min(99, Math.round((opt.prob || 0.35) * 100)));
+              const isEn = window.pulseI18n && window.pulseI18n.lang === 'en';
               
               // Ensure odds is ALWAYS calculated and never blank / '-'
               let numericOdds = Number(opt.odds);
@@ -1149,13 +1195,13 @@
               const showValue = !m.closed && !isUnlikely && edgePct >= 3.0;
 
               return `
-                <div class="mc-bento-opt ${isBest ? 'best' : ''} ${m.closed ? 'opt-locked' : ''} ${isUnlikely ? 'opt-unlikely' : ''}" title="${escapeHtml(opt.selection)}: %${probVal} ${t('probability', 'Olasılık')} @${displayOdds}">
+                <div class="mc-bento-opt ${isBest ? 'best' : ''} ${m.closed ? 'opt-locked' : ''} ${isUnlikely ? 'opt-unlikely' : ''}" title="${escapeHtml(tSelection(opt.selection))}: ${isEn ? `${probVal}%` : `%${probVal}`} ${t('probability', 'Olasılık')} @${displayOdds}">
                   <div class="mc-opt-left">
-                    <span class="mc-opt-name">${escapeHtml(opt.selection)}</span>
+                    <span class="mc-opt-name">${escapeHtml(tSelection(opt.selection))}</span>
                     ${showValue ? `<span class="mc-value-tag">+${edgePct.toFixed(1)}% ${t('value_edge', 'Değer')}</span>` : ''}
                   </div>
                   <div class="mc-opt-right">
-                    <span class="mc-prob-pill">${isUnlikely ? '&lt;%5' : `%${probVal}`}</span>
+                    <span class="mc-prob-pill">${isUnlikely ? (isEn ? '<5%' : '<%5') : (isEn ? `${probVal}%` : `%${probVal}`)}</span>
                     <span class="mc-odds-chip">@${displayOdds}</span>
                   </div>
                 </div>
@@ -1167,10 +1213,18 @@
     };
 
     if (container) {
-      container.innerHTML = orderedKeys.map(k => renderCardHtml(k, false)).join('');
+      const fullHtml = orderedKeys.map(k => renderCardHtml(k, false)).join('');
+      if (container._lastHtml !== fullHtml) {
+        container.innerHTML = fullHtml;
+        container._lastHtml = fullHtml;
+      }
     }
     if (overviewContainer) {
-      overviewContainer.innerHTML = overviewKeys.map(k => renderCardHtml(k, true)).join('');
+      const overHtml = overviewKeys.map(k => renderCardHtml(k, true)).join('');
+      if (overviewContainer._lastHtml !== overHtml) {
+        overviewContainer.innerHTML = overHtml;
+        overviewContainer._lastHtml = overHtml;
+      }
     }
   }
 
@@ -1518,7 +1572,7 @@
       return;
     }
 
-    stream.innerHTML = filtered.slice(0, 40).map(sig => {
+    const sigHtml = filtered.slice(0, 40).map(sig => {
       const hName = sig.homeName || t('team_home', 'Ev Sahibi');
       const aName = sig.awayName || t('team_away', 'Deplasman');
       const hLogo = resolveLogo(sig.homeLogo, hName);
@@ -1549,8 +1603,8 @@
 
           <div class="nc-signal-box">
             <div>
-              <span class="nc-sig-tag">${escapeHtml(cleanBadgeText(sig.tierBadge, t('spotlight_active_badge', 'SİNYAL AKTİF')))} • ${escapeHtml(cleanBadgeText(sig.archetypeLabel, t('flow_signal_tag', 'GİDİŞAT SİNYALİ')))}</span>
-              <h4 class="nc-sig-market">${escapeHtml(sig.selection || t('valuable_selection', 'Değerli Seçim'))}</h4>
+              <span class="nc-sig-tag">${escapeHtml(cleanBadgeText(sig.tierBadge, t('spotlight_active_badge', 'SİNYAL AKTİF')))} • ${escapeHtml(tArchetype(sig.archetypeKey || sig.archetype, cleanBadgeText(sig.archetypeLabel, t('flow_signal_tag', 'GİDİŞAT SİNYALİ'))))}</span>
+              <h4 class="nc-sig-market">${escapeHtml(tSelection(sig.selection || t('valuable_selection', 'Değerli Seçim')))}</h4>
             </div>
             <div class="nc-sig-metrics">
               <span class="nc-odd-badge">@${sig.odds || '-'}</span>
@@ -1566,6 +1620,11 @@
         </div>
       `;
     }).join('');
+
+    if (stream._lastHtml !== sigHtml) {
+      stream.innerHTML = sigHtml;
+      stream._lastHtml = sigHtml;
+    }
   }
 
   function getEventGlyph(cat, type) {
@@ -1625,11 +1684,30 @@
       return;
     }
 
-    stream.innerHTML = filtered.slice(0, 50).map(ev => {
+    const matchHtml = filtered.slice(0, 50).map(ev => {
       const hName = ev.homeName || t('team_home', 'Ev Sahibi');
       const aName = ev.awayName || t('team_away', 'Deplasman');
       const tName = ev.teamName || hName;
       const teamCrest = resolveLogo(ev.teamLogo || ev.homeLogo, tName);
+
+      let evTitle = ev.title || '';
+      let evDetail = ev.message || '';
+      if (window.pulseI18n && window.pulseI18n.lang === 'en') {
+        evTitle = evTitle
+          .replace(/GOL!/g, 'GOAL!')
+          .replace(/KIRMIZI KART!/g, 'RED CARD!')
+          .replace(/SARI KART/g, 'YELLOW CARD')
+          .replace(/İPTAL EDİLEN GOL \(VAR\)/g, 'DISALLOWED GOAL (VAR)')
+          .replace(/ASİST!/g, 'ASSIST!')
+          .replace(/Oyuncu Değişikliği/g, 'Substitution');
+        evDetail = evDetail
+          .replace(/10 kişi kaldı!/g, 'down to 10 men!')
+          .replace(/ağları havalandırdı!/g, 'scored!')
+          .replace(/sarı kart gördü/g, 'received a yellow card')
+          .replace(/kırmızı kart gördü/g, 'received a red card')
+          .replace(/golü iptal edildi/g, 'goal disallowed')
+          .replace(/golünde kilit pası veren isim oldu/g, 'provided the key assist');
+      }
 
       return `
         <div class="notif-card event-card cat-${escapeHtml(ev.category)}" data-match-id="${escapeHtml(ev.matchId)}">
@@ -1645,12 +1723,17 @@
                 <button class="nc-dismiss-btn" data-dismiss-evt="${escapeHtml(ev.id)}" title="${t('dismiss_event', 'Bildirimi Kapat')}">×</button>
               </div>
             </div>
-            <div class="ec-title">${escapeHtml(ev.title || '')}</div>
-            <div class="ec-detail">${escapeHtml(ev.message || '')}</div>
+            <div class="ec-title">${escapeHtml(evTitle)}</div>
+            <div class="ec-detail">${escapeHtml(evDetail)}</div>
           </div>
         </div>
       `;
     }).join('');
+
+    if (stream._lastHtml !== matchHtml) {
+      stream.innerHTML = matchHtml;
+      stream._lastHtml = matchHtml;
+    }
   }
 
   function showToast(item, isSignal) {
@@ -2162,7 +2245,7 @@
       const iconSvg = on
         ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>'
         : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>';
-      btnSound.innerHTML = `<span class="qsp-icon" id="soundIcon">${iconSvg}</span> <span class="qsp-text">Sesli Bildirimler</span>`;
+      btnSound.innerHTML = `<span class="qsp-icon" id="soundIcon">${iconSvg}</span> <span class="qsp-text" data-i18n="sound_notifications">${t('sound_notifications', 'Sesli Bildirimler')}</span>`;
     };
     syncSoundBtn();
     btnSound.addEventListener('click', () => {
@@ -2185,7 +2268,7 @@
     const toggleSigBtn = document.getElementById('toggleSignalNotifs');
     const syncSigToggle = () => {
       toggleSigBtn.classList.toggle('active', state.signalNotifsEnabled);
-      toggleSigBtn.textContent = state.signalNotifsEnabled ? 'Aktif' : 'Kapalı';
+      toggleSigBtn.textContent = state.signalNotifsEnabled ? t('status_active', 'Aktif') : t('status_off', 'Kapalı');
     };
     syncSigToggle();
     toggleSigBtn.addEventListener('click', () => {

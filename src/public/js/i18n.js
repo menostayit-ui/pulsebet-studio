@@ -246,7 +246,15 @@
       dismiss_signal: 'Sinyali Gizle',
       dismiss_event: 'Bildirimi Kapat',
       league_other: 'Diğer Ligler',
-      count_matches: 'Maç'
+      count_matches: 'Maç',
+      sec_live_matches: 'Canlı Karşılaşmalar',
+      sec_upcoming_matches: 'Bugünün Yaklaşan Karşılaşmaları',
+      no_matches_found: 'Eşleşen Karşılaşma Bulunamadı',
+      no_matches_found_sub: 'Farklı bir lig veya filtre seçimi yapabilirsiniz.',
+      fav_count_suffix: 'Favori Maç',
+      sig_count_suffix: 'Aktif Sinyal',
+      status_active: 'Aktif',
+      status_off: 'Kapalı'
     },
 
     en: {
@@ -488,7 +496,15 @@
       dismiss_signal: 'Dismiss Signal',
       dismiss_event: 'Dismiss Alert',
       league_other: 'Other Leagues',
-      count_matches: 'Matches'
+      count_matches: 'Matches',
+      sec_live_matches: 'Live Matches',
+      sec_upcoming_matches: "Today's Upcoming Fixtures",
+      no_matches_found: 'No Matching Fixtures Found',
+      no_matches_found_sub: 'Try selecting another league or adjusting your filter.',
+      fav_count_suffix: 'Favorite Matches',
+      sig_count_suffix: 'Active Signals',
+      status_active: 'Active',
+      status_off: 'Off'
     }
   };
 
@@ -565,6 +581,76 @@
         return fallbackDict[key];
       }
       return fallback || key;
+    }
+
+    translateMarketTitle(title) {
+      if (!title) return '';
+      if (this.currentLang === 'tr') return title;
+      const lower = title.toLowerCase();
+      if (lower.includes('maç sonucu') || lower.includes('ms')) return 'Full Time Result (1X2)';
+      if (lower.includes('karşılıklı gol') || lower.includes('kg') || lower.includes('btts')) return 'Both Teams to Score';
+      if (lower.includes('alt/üst') || lower.includes('over/under') || lower.includes('gol alt')) return 'Over / Under Goals';
+      if (lower.includes('sıradaki gol') || lower.includes('next goal')) return 'Next Goal';
+      if (lower.includes('ilk yarı sonucu') || lower.includes('iy')) return 'Half Time Result';
+      if (lower.includes('ilk yarı')) return 'Half Time Market';
+      return title;
+    }
+
+    translateSelection(sel) {
+      if (!sel) return '';
+      if (this.currentLang === 'tr') return sel;
+      let s = String(sel);
+      s = s.replace(/Ev Sahibi/gi, 'Home');
+      s = s.replace(/\bEv\b/gi, 'Home');
+      s = s.replace(/Deplasman/gi, 'Away');
+      s = s.replace(/\bDep\b/gi, 'Away');
+      s = s.replace(/Beraberlik/gi, 'Draw');
+      s = s.replace(/\bVar\b/gi, 'Yes');
+      s = s.replace(/\bYok\b/gi, 'No');
+      s = s.replace(/\bÜst\b/gi, 'Over');
+      s = s.replace(/\bAlt\b/gi, 'Under');
+      s = s.replace(/Gol Olmaz/gi, 'No Goal');
+      return s;
+    }
+
+    translateArchetype(archKey, defaultLabel) {
+      if (this.currentLang === 'tr') return defaultLabel || 'Gidişat İzleniyor';
+      const keyMap = {
+        'HOME_SIEGE': 'Home Siege & Relentless Pressure',
+        'AWAY_SIEGE': 'Away Siege & Heavy Pressure',
+        'HIGH_TEMPO_BOX_TO_BOX': 'High Tempo Box-to-Box',
+        'AWAY_COUNTER_PUNCH': 'Away Lethal Counter-Attack',
+        'HOME_COUNTER_PUNCH': 'Home Lethal Counter-Attack',
+        'LATE_GAME_VOLATILITY': 'Late Game Volatility & Desperation Push',
+        'RED_CARD_POWERPLAY_HOME': 'Home Red Card Advantage & Siege',
+        'RED_CARD_POWERPLAY_AWAY': 'Away Red Card Advantage & Siege',
+        'STALEMATE_DEFENSIVE': 'Midfield Tactical Stalemate',
+        'LOW_TEMPO_CONTROL': 'Controlled Low-Tempo Possession',
+        'OPEN_CHANCE_EXCHANGE': 'Open End-to-End Chance Exchange',
+        'CORNER_PRESSURE_CLUSTER': 'Corner Cluster & Set-Piece Assault',
+        'PRE_MATCH': 'Pre-Match Tactical Setup'
+      };
+      return keyMap[archKey] || defaultLabel || 'Tracking Match Flow';
+    }
+
+    translateNarrative(archKey, trNarrative) {
+      if (this.currentLang === 'tr') return trNarrative;
+      const narrativeMap = {
+        'HOME_SIEGE': 'Home side is pinning the opponent deep in their final third, generating sustained box entries and high shot frequency.',
+        'AWAY_SIEGE': 'Away team is dominating pitch tilt and creating sustained offensive pressure inside the opposition penalty area.',
+        'HIGH_TEMPO_BOX_TO_BOX': 'Rapid transition game with both sides bypassing central midfield and trading direct attacking waves.',
+        'AWAY_COUNTER_PUNCH': 'Away side is conceding possession while launching lethal high-speed counter transitions against an over-extended home defense.',
+        'HOME_COUNTER_PUNCH': 'Home side is absorbing away pressure and exploiting wide defensive gaps with surgical counter transitions.',
+        'LATE_GAME_VOLATILITY': 'Match clock entering decisive late phase with both sides committing forward; goal volatility is elevated.',
+        'RED_CARD_POWERPLAY_HOME': 'Home team holding numerical superiority and establishing a full-pitch encirclement around the defense.',
+        'RED_CARD_POWERPLAY_AWAY': 'Away team utilizing numerical superiority to stretch the home block and create wide overloads.',
+        'STALEMATE_DEFENSIVE': 'Both teams are defensively disciplined with high tactical containment and minimal clear-cut opportunities.',
+        'LOW_TEMPO_CONTROL': 'Patient possession sequences with low tactical risk and limited transitional transitions.',
+        'OPEN_CHANCE_EXCHANGE': 'Both teams trading high-danger opportunities; defensive transitions are dislocated.',
+        'CORNER_PRESSURE_CLUSTER': 'Heavy set-piece clustering and repeated box deliveries creating immediate breakthrough threat.',
+        'PRE_MATCH': 'Pre-match quantitative baseline based on historical distribution, field tilt models, and opening price action.'
+      };
+      return narrativeMap[archKey] || trNarrative;
     }
 
     subscribe(fn) {

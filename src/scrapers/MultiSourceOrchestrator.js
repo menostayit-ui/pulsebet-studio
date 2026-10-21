@@ -594,8 +594,19 @@ class MultiSourceOrchestrator {
 
     targetMatch.home.stats.yellowCards = Math.max(targetMatch.home.stats.yellowCards || 0, hYc);
     targetMatch.away.stats.yellowCards = Math.max(targetMatch.away.stats.yellowCards || 0, aYc);
-    targetMatch.home.stats.redCards = Math.max(targetMatch.home.stats.redCards || 0, hRc);
-    targetMatch.away.stats.redCards = Math.max(targetMatch.away.stats.redCards || 0, aRc);
+
+    // Doğrulanmış olay geçmişi (incidents) mevcutsa, kırmızı kart adedini doğrulanmış kırmızı kart olaylarına eşitler.
+    // Bu işlem, hatalı istatistik etiketlerinden (recovered, delivered vb.) sızan hayalet kırmızı kartları kesin olarak sıfırlar.
+    if (existing.length > 0) {
+      targetMatch.home.stats.redCards = hRc;
+      targetMatch.away.stats.redCards = aRc;
+      targetMatch.home.redCards = hRc;
+      targetMatch.away.redCards = aRc;
+    } else {
+      targetMatch.home.stats.redCards = Math.max(targetMatch.home.stats.redCards || 0, hRc);
+      targetMatch.away.stats.redCards = Math.max(targetMatch.away.stats.redCards || 0, aRc);
+    }
+
     targetMatch.home.stats.substitutions = Math.max(targetMatch.home.stats.substitutions || 0, hSubs);
     targetMatch.away.stats.substitutions = Math.max(targetMatch.away.stats.substitutions || 0, aSubs);
   }
@@ -1157,17 +1168,15 @@ class MultiSourceOrchestrator {
         promises.push(
           this.scores365.fetchMatchStats(s365Id, match.linkedIds.s365HomeId, match.linkedIds.s365AwayId)
             .then(st => this.mergeStats(match, st, '365scores'))
-            .catch(() => {}),
-          this.scores365.fetchMatchIncidents(s365Id, match.linkedIds.s365HomeId, match.linkedIds.s365AwayId)
-            .then(inc => this.mergeIncidents(match, inc))
             .catch(() => {})
         );
       }
-      // Provide automatic odds fallback from 365Scores if Flashscore odds are missing
+      // 365Scores olay ve oranlarını tek optimize HTTP isteğiyle çek (gecikmeyi yarıya indirir)
       promises.push(
-        this.scores365.fetchMatchOdds(s365Id)
-          .then(od => {
-            if (od) this.mergeOdds(match, od, '365scores');
+        this.scores365.fetchGameDetails(s365Id, match.linkedIds.s365HomeId, match.linkedIds.s365AwayId)
+          .then(res => {
+            if (res.odds) this.mergeOdds(match, res.odds, '365scores');
+            if (res.incidents && res.incidents.length > 0) this.mergeIncidents(match, res.incidents);
           })
           .catch(() => {})
       );
@@ -1222,17 +1231,20 @@ class MultiSourceOrchestrator {
       const newEvents = [];
       const newSignals = [];
 
-      // Concurrency batch size: 6 with smooth jittered inter-chunk pacing to prevent upstream rate limiting
-      const chunkSize = 6;
+      // Concurrency batch size: 8 with ultra-smooth low-latency jittered pacing
+      const chunkSize = 8;
       for (let i = 0; i < targets.length; i += chunkSize) {
         const chunk = targets.slice(i, i + chunkSize);
-        const res = await Promise.all(chunk.map(m => this.enrichSingleMatch(m)));
-        for (const r of res) {
-          if (r?.detectedEvents?.length > 0) newEvents.push(...r.detectedEvents);
-          if (r?.detectedSignals?.length > 0) newSignals.push(...r.detectedSignals);
+        const res = await Promise.allSettled(chunk.map(m => this.enrichSingleMatch(m)));
+        for (const item of res) {
+          if (item.status === 'fulfilled') {
+            const r = item.value;
+            if (r?.detectedEvents?.length > 0) newEvents.push(...r.detectedEvents);
+            if (r?.detectedSignals?.length > 0) newSignals.push(...r.detectedSignals);
+          }
         }
         if (i + chunkSize < targets.length) {
-          const chunkJitter = Math.floor(Math.random() * 50) + 40;
+          const chunkJitter = Math.floor(Math.random() * 20) + 15;
           await new Promise(resolve => setTimeout(resolve, chunkJitter));
         }
       }
@@ -1263,8 +1275,8 @@ class MultiSourceOrchestrator {
   }
 
   getSpineInterval() {
-    // Spine polling: Canlı maç varken 2.0s, sadece yaklaşan maçlar varken 4.5s
-    return this.hasLiveMatches() ? 2000 : 4500;
+    // Spine polling: Canlı maç varken anlık 1.3s, sadece yaklaşan maçlar varken 3.8s
+    return this.hasLiveMatches() ? 1300 : 3800;
   }
 
   scheduleSpinePoll() {
@@ -1283,7 +1295,8 @@ class MultiSourceOrchestrator {
 
   scheduleDeepTelemetry() {
     if (!this.isRunning) return;
-    // Deep telemetry: 2.8s
+    // Deep telemetry: Canlı maç varken 1.7s, sakin zamanlarda 3.8s
+    const deepInterval = this.hasLiveMatches() ? 1700 : 3800;
     this.deepTimer = setTimeout(async () => {
       try {
         await this.pollDeepTelemetry();
@@ -1292,7 +1305,7 @@ class MultiSourceOrchestrator {
       } finally {
         this.scheduleDeepTelemetry();
       }
-    }, 2800);
+    }, deepInterval);
   }
 
   pruneStaleMatches(timeoutMs = 12 * 60 * 1000) {

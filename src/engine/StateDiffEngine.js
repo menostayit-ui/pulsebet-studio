@@ -204,6 +204,22 @@ class StateDiffEngine {
           continue;
         }
 
+        // Aynı dakikada (±2 dk) geçerli bir GOAL olayı varsa, gol onaylanmıştır ve geçerlidir!
+        const hasValidGoalAroundSameMin = (nextMatch.incidents || []).some(
+          i => i.eventType === 'GOAL' && i.team === inc.team && Math.abs((i.minute || 0) - incMin) <= 2
+        );
+        if (hasValidGoalAroundSameMin) {
+          continue;
+        }
+
+        // Eğer olayın skor bilgisi mevcut skor ile eşleşiyor veya altındaysa, gol geçerlidir!
+        if (inc.team === 'HOME' && typeof inc.homeScore === 'number' && (nextMatch.home.score || 0) >= inc.homeScore) {
+          continue;
+        }
+        if (inc.team === 'AWAY' && typeof inc.awayScore === 'number' && (nextMatch.away.score || 0) >= inc.awayScore) {
+          continue;
+        }
+
         const reasonLower = (inc.reason || '').toLowerCase();
         const isConfirmedOrValid =
           reasonLower.includes('confirmed') ||
@@ -213,7 +229,11 @@ class StateDiffEngine {
           reasonLower.includes('onaylandı') ||
           reasonLower.includes('onaylandi') ||
           reasonLower.includes('geçerli') ||
-          reasonLower.includes('gecerli');
+          reasonLower.includes('gecerli') ||
+          reasonLower.includes('gol sayıldı') ||
+          reasonLower.includes('goal awarded') ||
+          reasonLower.includes('decision: goal') ||
+          reasonLower.includes('karar: gol');
 
         if (isConfirmedOrValid) {
           continue;
@@ -224,6 +244,7 @@ class StateDiffEngine {
           reasonLower.includes('overturned') ||
           reasonLower.includes('no goal') ||
           reasonLower.includes('iptal edildi') ||
+          reasonLower.includes('gol iptal') ||
           reasonLower.includes('goal cancelled') ||
           reasonLower.includes('goal canceled') ||
           reasonLower.includes('iptal');
@@ -399,6 +420,16 @@ class StateDiffEngine {
       const prevRc = Math.max(prevMatch[side].redCards || 0, pStats.redCards || 0);
       const nextRc = Math.max(nextMatch[side].redCards || 0, nStats.redCards || 0);
       if (nextRc > prevRc && (nextRc - prevRc) === 1) {
+        // Kırmızı kart doğrulama: Maç olayları (incidents) yüklüyse, bu takım için kayıtlı RED_CARD olayı bulunmalıdır.
+        // İstatistik isimlerinde geçen 'recovered', 'delivered' gibi kelimelerden kaynaklanan hayalet kırmızı kartları önler.
+        const hasVerifiedRcIncident = (nextMatch.incidents || []).some(
+          i => i.eventType === 'RED_CARD' && i.team === teamCode
+        );
+        const hasIncidents = Array.isArray(nextMatch.incidents) && nextMatch.incidents.length > 0;
+        if (hasIncidents && !hasVerifiedRcIncident) {
+          continue;
+        }
+
         const fp = `${nextMatch.matchId}:rc:${teamCode}:${nextRc}`;
         if (!this.hasEmitted(fp)) {
           events.push({

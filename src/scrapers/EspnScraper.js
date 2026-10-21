@@ -164,7 +164,14 @@ class EspnScraper {
       const url = `${this.baseUrl}/scoreboard?_t=${Date.now()}`;
       const res = await this.fetchWithRetry(url);
       const data = await res.json();
-      if (!data || !Array.isArray(data.events)) return [];
+      return this.parseScoreboard(data);
+    } catch (_) {
+      return [];
+    }
+  }
+
+  parseScoreboard(data) {
+    if (!data || !Array.isArray(data.events)) return [];
 
     const matches = [];
 
@@ -228,8 +235,8 @@ class EspnScraper {
           else if (name.includes('woodwork')) s.woodwork = val;
           else if (name.includes('foul')) s.fouls = val;
           else if (name.includes('corner')) s.corners = val;
-          else if (name.includes('yellow')) s.yellowCards = val;
-          else if (name.includes('red')) s.redCards = val;
+          else if (name === 'yellowcards' || name === 'yellowcard' || name.includes('yellow card') || name.includes('yellow_card') || (name.includes('yellow') && name.includes('card'))) s.yellowCards = val;
+          else if (name === 'redcards' || name === 'redcard' || name.includes('red card') || name.includes('red_card') || (name.includes('red') && name.includes('card'))) s.redCards = val;
           else if (name.includes('offside')) s.offsides = val;
           else if (name.includes('freekick') || name.includes('free kick')) s.freeKicks = val;
           else if (name.includes('save')) {
@@ -377,9 +384,6 @@ class EspnScraper {
     }
 
     return matches;
-    } catch (_) {
-      return [];
-    }
   }
 
   /**
@@ -432,8 +436,8 @@ class EspnScraper {
           else if (name.includes('woodwork')) s.woodwork = val;
           else if (name.includes('foul')) s.fouls = val;
           else if (name.includes('corner')) s.corners = val;
-          else if (name.includes('yellow')) s.yellowCards = val;
-          else if (name.includes('red')) s.redCards = val;
+          else if (name === 'yellowcards' || name === 'yellowcard' || name.includes('yellow card') || name.includes('yellow_card') || (name.includes('yellow') && name.includes('card'))) s.yellowCards = val;
+          else if (name === 'redcards' || name === 'redcard' || name.includes('red card') || name.includes('red_card') || (name.includes('red') && name.includes('card'))) s.redCards = val;
           else if (name.includes('offside')) s.offsides = val;
           else if (name.includes('freekick') || name.includes('free kick')) s.freeKicks = val;
           else if (name.includes('save')) {
