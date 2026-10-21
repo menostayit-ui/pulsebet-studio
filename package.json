@@ -1,0 +1,25 @@
+{
+  "name": "pulsebet-studio",
+  "version": "1.0.0",
+  "description": "PulseBet Studio — Real-Time Football Momentum & Quantitative Live Betting Analytics Terminal",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "keywords": [
+    "football",
+    "soccer",
+    "live-betting",
+    "sports-analytics",
+    "momentum-radar",
+    "quantitative-finance",
+    "dixon-coles",
+    "poisson-model",
+    "websocket"
+  ],
+  "author": "PulseBet Core Contributors",
+  "license": "MIT",
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="tr" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
+  <title>PulseBet Studio — 2026 Neo-Minimalist Sports &amp; Signal Arena</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700;800&subset=latin,latin-ext&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/styles.css?v=6.0.0-neo-minimalist" />
+</head>
+<body>
+  <!-- ================= TOPBAR (2026 Minimalist Header) ================= -->
+  <header class="topbar">
+    <!-- Left: Brand Logo & Green Pulse Dot -->
+    <div class="brand">
+      <div class="brand-logo">
+        <span class="brand-pulse"></span>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">
+          <circle cx="12" cy="12" r="9"></circle>
+          <path d="M12 3v4M12 17v4M3 12h4M17 12h4"></path>
+          <circle cx="12" cy="3" r="3"></circle>
+        </svg>
+      </div>
+      <div class="brand-titles">
+        <h1>PulseBet <span>Studio</span></h1>
+        <p>Canlı Futbol &amp; Akıllı Sinyal Platformu</p>
+      </div>
+    </div>
+
+    <!-- Center: Linear / Apple Segmented 3-Pill Switcher -->
+    <nav class="main-view-switcher" id="mainViewSwitcher">
+      <button class="view-tab active" data-view="center">
+        <svg class="vt-svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20M2 12h20"/></svg>
+        <span>Canlı Maçlar</span>
+        <span class="vt-badge" id="navBadgeAll">0</span>
+      </button>
+      <button class="view-tab" data-view="favorites">
+        <svg class="vt-svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        <span>Favoriler</span>
+        <span class="vt-badge star-badge" id="navBadgeFav">0</span>
+      </button>
+      <button class="view-tab" data-view="radar">
+        <svg class="vt-svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        <span>Sinyal Radarı</span>
+        <span class="vt-badge pulse-badge" id="navBadgeSignals">0</span>
+      </button>
+    </nav>
+
+    <!-- Right: Minimalist Controls (Live Pill + Refresh + Preferences Popover) -->
+    <div class="topbar-actions">
+      <!-- Live Sync Indicator -->
+      <div class="source-pills" id="sourcePills">
+        <div class="source-pill online" id="src-live" title="Canlı Veri Senkronizasyonu">
+          <span class="dot"></span>
+          <span class="name">Canlı</span>
+        </div>
+      </div>
+
+      <!-- Instant Sync / Refresh Button -->
+      <button class="action-chip icon-only" id="btnForceRefresh" title="Anlık Senkronize Et" data-i18n-title="force_refresh">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3">
+          <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.19"/>
+        </svg>
+      </button>
+
+      <!-- Language Switcher Pill (TR / EN) -->
+      <button class="action-chip lang-toggle-pill" id="btnLangToggle" title="Dil Değiştir / Switch Language (TR / EN)">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="2" y1="12" x2="22" y2="12"></line>
+          <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+        </svg>
+        <span class="lang-label">TR</span>
+      </button>
+
+      <!-- Quick Preferences / Zen Controller Popover -->
+      <div class="quick-settings-dropdown" id="quickSettingsDropdown">
+        <button class="action-chip quick-settings-trigger" id="btnQuickSettingsTrigger" title="Hızlı Tercihler &amp; Görünüm Ayarları" aria-expanded="false" data-i18n-title="preferences">
+          <svg class="gear-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+          <span data-i18n="preferences">Tercihler</span>
+        </button>
+
+        <div class="quick-settings-popover hidden" id="quickSettingsPopover">
+          <div class="qsp-header">
+            <span data-i18n="quick_settings_title">Hızlı Tercihler &amp; Görünüm</span>
+          </div>
+
+          <div class="qsp-section">
+            <span class="qsp-section-title" data-i18n="sec_appearance_sound">Görsel &amp; Ses</span>
+            <button class="qsp-item-btn theme-btn" id="btnThemeToggle" title="Açık / Koyu Tema Değiştir">
+              <span class="qsp-icon" id="themeIcon">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
+              </span>
+              <span class="qsp-text" id="themeLabel" data-i18n="theme_light">Açık Tema</span>
+            </button>
+            <button class="qsp-item-btn active" id="btnSoundToggle" title="Sesli uyarıları aç/kapat">
+              <span class="qsp-icon" id="soundIcon">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
+              </span>
+              <span class="qsp-text" data-i18n="sound_notifications">Sesli Bildirimler</span>
+            </button>
+            <button class="qsp-item-btn" id="btnPopoverLangToggle" title="Dil Değiştir / Switch Language">
+              <span class="qsp-icon">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+              </span>
+              <span class="qsp-text" id="langPopoverLabel">English / Türkçe</span>
+            </button>
+          </div>
+
+          <div class="qsp-section">
+            <span class="qsp-section-title" data-i18n="sec_notif_filter">Bildirim Filtresi</span>
+            <button class="qsp-item-btn" id="btnStarredOnly" title="Bildirimleri sadece favori maçlar için filtrele">
+              <span class="qsp-icon">★</span>
+              <span class="qsp-text" data-i18n="starred_only">Yalnızca Favori Bildirimleri</span>
+            </button>
+          </div>
+
+          <div class="qsp-section">
+            <span class="qsp-section-title" data-i18n="sec_layout">Panel Görünümleri</span>
+            <button class="qsp-item-btn layout-chip" id="btnToggleLeftSidebar" title="Sol Maç Listesini Gizle/Aç (Kısayol: [ )">
+              <span class="qsp-icon layout-icon">◧</span>
+              <span class="qsp-text layout-text" data-i18n="layout_left">Sol Maç Listesi</span>
+            </button>
+            <button class="qsp-item-btn layout-chip" id="btnToggleRightSidebar" title="Sağ Bildirimleri Gizle/Aç (Kısayol: ] )">
+              <span class="qsp-icon layout-icon">◨</span>
+              <span class="qsp-text layout-text" data-i18n="layout_right">Sağ Bildirim Paneli</span>
+            </button>
+          </div>
+        </div>
+      </div>
+              <span class="qsp-icon layout-icon">◨</span>
+              <span class="qsp-text layout-text">Sağ Bildirim Paneli</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ================= VIEW 1: CANLI MAÇ MERKEZİ (3-Column Arena) ================= -->
+  <main class="workspace" id="centerViewContainer">
+    <!-- Floating Edge Triggers to restore collapsed sidebars -->
+    <button class="floating-edge-trigger edge-left hidden" id="btnExpandLeft" title="Sol Maç Listesini Göster">
+      <span class="fet-icon">›</span>
+      <span class="fet-label">Maçlar</span>
+    </button>
+    <button class="floating-edge-trigger edge-right hidden" id="btnExpandRight" title="Sağ Bildirim Panelini Göster">
+      <span class="fet-icon">‹</span>
+      <span class="fet-label">Bildirimler</span>
+    </button>
+
+    <!-- LEFT COLUMN: FotMob / Apple Sports Compact Match Lounge (280px) -->
+    <aside class="sidebar-matches" id="sidebarMatches">
+      <div class="sidebar-header">
+        <div class="sidebar-header-top">
+          <!-- Status Filter Tabs (Tümü | Canlı | Yaklaşan | Sinyal) -->
+          <div class="filter-tabs" id="matchFilterTabs">
+            <button class="filter-tab active" data-filter="ALL">Tümü <span id="countAll">0</span></button>
+            <button class="filter-tab live-tab" data-filter="LIVE">Canlı <span id="countLive">0</span></button>
+            <button class="filter-tab" data-filter="UPCOMING">Yaklaşan <span id="countUpcoming">0</span></button>
+            <button class="filter-tab signal-tab" data-filter="SIGNALS">Sinyal <span id="countSignals">0</span></button>
+          </div>
+          <button class="sidebar-collapse-btn" id="btnCollapseLeft" title="Sol Paneli Daralt">‹</button>
+        </div>
+
+        <!-- Team & League Instant Search -->
+        <div class="sidebar-search-box">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          <input type="text" id="searchInput" placeholder="Takım veya lig ara..." autocomplete="off" />
+          <button class="clear-search-btn hidden" id="btnClearSearch" title="Aramayı Temizle">×</button>
+        </div>
+
+        <!-- Custom League Picker Popover + Quick League Pills -->
+        <div class="league-filter-controls">
+          <div class="custom-league-dropdown" id="customLeagueDropdown">
+            <button type="button" class="league-picker-trigger" id="btnLeaguePickerTrigger" aria-expanded="false">
+              <div class="lpt-left">
+                <span class="lpt-label" id="selectedLeagueLabel">Tüm Ligler</span>
+              </div>
+              <div class="lpt-right">
+                <span class="lpt-count" id="selectedLeagueCount">0</span>
+                <svg class="lpt-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">
+                  <polyline points="6 9 12 15 18 9"></polyline>
+                </svg>
+              </div>
+            </button>
+
+            <div class="league-picker-popover hidden" id="leaguePickerPopover">
+              <div class="lpp-search-wrap">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                  <circle cx="11" cy="11" r="8"></circle>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+                <input type="text" id="leagueSearchInput" placeholder="Lig veya ülke filtrele..." autocomplete="off" />
+              </div>
+              <div class="lpp-list" id="leaguePickerList">
+                <!-- Populated dynamically -->
+              </div>
+            </div>
+          </div>
+
+          <div class="league-pills-scroll" id="leagueQuickPills">
+            <!-- Populated dynamically -->
+          </div>
+        </div>
+      </div>
+
+      <div class="match-list" id="matchListContainer">
+        <div class="empty-state-card">
+          <h4>Canlı ve Yaklaşan Maçlar Yükleniyor</h4>
+          <p>Gerçek zamanlı kaynaklardan maç verileri senkronize ediliyor...</p>
+        </div>
+      </div>
+    </aside>
+
+    <!-- CENTER COLUMN: Aesthetic Match Studio (Hero Stadium + 5 Segmented Panes) -->
+    <section class="match-studio" id="centerStudio">
+      <!-- 1. COMPACT HERO MATCH ARENA (Luxury Stadium Card) -->
+      <div class="hero-card">
+        <div class="hero-top">
+          <div class="hero-league-badge-wrap">
+            <div class="hero-league-pill">
+              <span class="hl-dot"></span>
+              <span id="heroLeague">LİG SEÇİLMEDİ</span>
+            </div>
+            <span class="hero-stage-badge" id="heroMatchStage">RESMİ MAÇ</span>
+          </div>
+          <div class="hero-badges">
+            <span class="signal-status-pill" id="heroSignalStatusPill">Gidişat İzleniyor</span>
+            <button class="hero-star-btn" id="heroStarBtn" title="Favorilere Ekle">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+              <span>Favoriye Ekle</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="hero-scoreboard">
+          <!-- Home Team -->
+          <div class="hero-team home">
+            <div class="team-crest-lg">
+              <img id="heroHomeLogo" src="" alt="Ev Sahibi Logo" />
+            </div>
+            <div class="team-info">
+              <span class="team-side-tag">EV SAHİBİ</span>
+              <h2 id="heroHomeName">Ev Sahibi</h2>
+              <div class="team-meta">
+                <span class="xg-badge" id="heroHomeXg">xG 0.00</span>
+                <span class="rc-tag hidden" id="heroHomeRc">0 Kırmızı</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Center Tabular Score & Live Minute Badge -->
+          <div class="hero-center-score">
+            <div class="score-display">
+              <span id="heroHomeScore">0</span>
+              <span class="score-colon">:</span>
+              <span id="heroAwayScore">0</span>
+            </div>
+            <div class="minute-badge" id="heroMinuteBadge">
+              <span class="min-pulse-dot"></span>
+              <span class="min-text">--'</span>
+            </div>
+            <div class="tempo-caption" id="heroTempoBadge">Dengeli Tempo</div>
+          </div>
+
+          <!-- Away Team -->
+          <div class="hero-team away">
+            <div class="team-info align-right">
+              <span class="team-side-tag">DEPLASMAN</span>
+              <h2 id="heroAwayName">Deplasman</h2>
+              <div class="team-meta justify-end">
+                <span class="rc-tag hidden" id="heroAwayRc">0 Kırmızı</span>
+                <span class="xg-badge" id="heroAwayXg">xG 0.00</span>
+              </div>
+            </div>
+            <div class="team-crest-lg">
+              <img id="heroAwayLogo" src="" alt="Deplasman Logo" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2. STUDIO NAVIGATION TABS (Segmented Apple / Linear Controller) -->
+      <nav class="studio-tabs studio-nav-bar" id="studioTabs">
+        <button class="studio-tab-btn snav-tab active" data-studio-tab="overview" data-stab="overview">
+          <svg class="st-svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/></svg>
+          <span class="st-label">Genel Bakış</span>
+        </button>
+        <button class="studio-tab-btn snav-tab" data-studio-tab="stats" data-stab="stats">
+          <svg class="st-svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+          <span class="st-label">İstatistikler</span>
+        </button>
+        <button class="studio-tab-btn snav-tab" data-studio-tab="signals" data-stab="signals">
+          <svg class="st-svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+          <span class="st-label">Sinyaller &amp; Taktik</span>
+        </button>
+        <button class="studio-tab-btn snav-tab" data-studio-tab="markets" data-stab="markets">
+          <svg class="st-svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></svg>
+          <span class="st-label">Marketler</span>
+        </button>
+        <button class="studio-tab-btn snav-tab" data-studio-tab="timeline" data-stab="timeline">
+          <svg class="st-svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          <span class="st-label">Akış &amp; Kadro</span>
+        </button>
+      </nav>
+
+      <!-- 3. STUDIO TAB PANES -->
+
+      <!-- TAB PANE 1: GENEL BAKIŞ (OVERVIEW BENTO - ZERO SCROLL) -->
+      <div class="studio-tab-pane active" id="paneOverview" data-tab-content="overview">
+        <!-- Live Momentum & Pressure Radar -->
+        <div class="flow-reader-bar">
+          <div class="flow-reader-top">
+            <div class="flow-reader-title">
+              <span class="flow-radar-icon">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+              </span>
+              <strong id="flowArchetypeLabel">Canlı Saha Baskısı ve Momentum Radarı</strong>
+            </div>
+            <div class="pressure-values">
+              <span class="pm-val home" id="igpHomeLabel">Ev Baskı: %50</span>
+              <span class="pm-sep">•</span>
+              <span class="pm-val away" id="igpAwayLabel">Dep Baskı: %50</span>
+            </div>
+          </div>
+          <div class="pressure-meter">
+            <div class="pm-fill-home" id="igpHomeBar" style="width: 50%"></div>
+            <div class="pm-center-marker"></div>
+            <div class="pm-fill-away" id="igpAwayBar" style="width: 50%"></div>
+          </div>
+          <p class="flow-narrative" id="flowNarrativeText">
+            Sol listeden bir maç seçtiğinizde taktiksel gidişat, şut kalitesi ve dakika/skor psikolojisi burada özetlenir.
+          </p>
+        </div>
+
+        <!-- 2-Column Balanced Bento Grid -->
+        <div class="overview-bento overview-bento-grid" id="overviewBentoGrid">
+          <!-- Left: Key 4 Stats Bento Box -->
+          <div class="section-block overview-stats-card">
+            <div class="section-head">
+              <div>
+                <h3>Kritik Maç Metrikleri</h3>
+                <p class="section-sub">En belirleyici 4 canlı saha verisi</p>
+              </div>
+              <button class="bento-link-btn" data-goto-stab="stats" data-jump-tab="stats">Tüm 10 İstatistiği Aç →</button>
+            </div>
+            <div class="stats-matrix-rows compact" id="overviewStatsRows">
+              <!-- Top 4 stats rendered here -->
+            </div>
+          </div>
+
+          <!-- Right: Active AI Signal Spotlight + Top 3 Value Markets -->
+          <div class="overview-right-stack">
+            <!-- Active AI Signal Spotlight in Overview -->
+            <div class="overview-signal-wrapper" id="overviewSignalBox">
+              <!-- Populated dynamically -->
+            </div>
+
+            <!-- Top 3 Core Markets Preview -->
+            <div class="section-block overview-markets-card">
+              <div class="section-head">
+                <div>
+                  <h3>Öne Çıkan Marketler</h3>
+                  <p class="section-sub">MS, 2.5/3.5 Alt/Üst ve Sıradaki Gol canlı oranları</p>
+                </div>
+                <button class="bento-link-btn" data-goto-stab="markets" data-jump-tab="markets">Tüm 6 Marketi Aç →</button>
+              </div>
+              <div class="overview-markets-grid" id="overviewMarketsGrid">
+                <!-- 3 Top markets rendered here -->
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB PANE 2: İSTATİSTİKLER & xG (FotMob Central Matrix) -->
+      <div class="studio-tab-pane hidden" id="paneStats" data-tab-content="stats">
+        <div class="compact-stats-box matrix-card-centered">
+          <div class="section-head">
+            <div>
+              <h3>Resmi Maç İstatistik Matrisi</h3>
+              <p class="section-sub">Canlı performans verileri ve iki yönlü saha etkinliği</p>
+            </div>
+            <div class="matrix-legend">
+              <span class="legend-chip home"><span class="leg-dot home"></span> Ev Sahibi</span>
+              <span class="legend-chip away"><span class="leg-dot away"></span> Deplasman</span>
+            </div>
+          </div>
+
+          <!-- Matrix Team Header Strip -->
+          <div class="matrix-teams-strip">
+            <div class="mts-team home">
+              <img class="crest-sm" id="matrixHomeLogo" src="" alt="" />
+              <span class="mts-name" id="matrixHomeName">Ev Sahibi</span>
+            </div>
+            <div class="mts-center">
+              <span class="mts-badge">RESMİ İSTATİSTİK MATRİSİ</span>
+            </div>
+            <div class="mts-team away">
+              <span class="mts-name" id="matrixAwayName">Deplasman</span>
+              <img class="crest-sm" id="matrixAwayLogo" src="" alt="" />
+            </div>
+          </div>
+
+          <!-- 10 Metrics Dual-Bar Matrix Rows Container -->
+          <div class="stats-matrix-rows full-matrix" id="statsMatrixRows">
+            <!-- Populated dynamically -->
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB PANE 3: AI SİNYALİ & TAKTİK -->
+      <div class="studio-tab-pane hidden" id="paneSignals" data-tab-content="signals">
+        <div class="signals-pane-container">
+          <div class="selective-signal-section" id="selectiveSignalBox">
+            <!-- Populated dynamically -->
+          </div>
+
+          <div class="section-block evidence-block">
+            <div class="section-head">
+              <div>
+                <h3>Taktiksel Gidişat Kanıt Matrisi</h3>
+                <p class="section-sub">Kantitatif sinyal modelini tetikleyen 4 boyutlu saha faktörleri</p>
+              </div>
+            </div>
+            <div class="flow-evidence-grid" id="flowEvidenceGrid">
+              <!-- Evidence factors rendered dynamically -->
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB PANE 4: CANLI ORANLAR (6 Core Markets) -->
+      <div class="studio-tab-pane hidden" id="paneMarkets" data-tab-content="markets">
+        <div class="section-block markets-full-block">
+          <div class="section-head">
+            <div>
+              <h3>Market Beklentileri &amp; Değerli Oran Fırsatları</h3>
+              <p class="section-sub">Poisson &amp; Dixon-Coles olasılıkları, değer oranları ve kilitlenen market durumları</p>
+            </div>
+            <span class="lambda-pill hidden" id="lambdaBadge"></span>
+          </div>
+          <div class="markets-grid" id="marketsGridContainer">
+            <!-- 6 Market cards rendered here -->
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB PANE 5: OLAY AKIŞI & KADRO -->
+      <div class="studio-tab-pane hidden" id="paneTimeline" data-tab-content="timeline">
+        <div class="bottom-dual-grid">
+          <div class="section-block">
+            <div class="section-head">
+              <div>
+                <h3>Maç Olay Akışı</h3>
+                <p class="section-sub">Gol, asist, kart ve VAR kararları</p>
+              </div>
+            </div>
+            <div class="timeline-list" id="matchTimelineList">
+              <div class="empty-box small">Henüz kayıtlı maç olayı yok.</div>
+            </div>
+          </div>
+
+          <div class="section-block">
+            <div class="section-head">
+              <div>
+                <h3>Öne Çıkan Oyuncular</h3>
+                <p class="section-sub">Hücum, oyun kurulumu ve savunma etkinliği</p>
+              </div>
+            </div>
+            <div class="players-summary-list" id="playersImpactBox">
+              <div class="empty-box small">Oyuncu verileri analiz ediliyor...</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Hidden legacy elements container to ensure 100% backward safety for any legacy readers -->
+      <div class="hidden" aria-hidden="true">
+        <div id="studioNavBar"></div>
+        <span id="shotHomeTeamName"></span><span id="shotAwayTeamName"></span>
+        <img id="shotHomeLogo" src="" alt="" /><img id="shotAwayLogo" src="" alt="" />
+        <span id="shotHomeAcc"></span><span id="shotAwayAcc"></span>
+        <span id="homeTotalShots"></span><span id="homeShotsOn"></span><span id="homeShotsOff"></span>
+        <span id="awayTotalShots"></span><span id="awayShotsOn"></span><span id="awayShotsOff"></span>
+        <div id="homeShotBarOn"></div><div id="awayShotBarOn"></div>
+        <span id="homeInsideBox"></span><span id="awayInsideBox"></span>
+        <span id="homeBigChances"></span><span id="awayBigChances"></span>
+        <span id="homeDelta10Shots"></span><span id="awayDelta10Shots"></span>
+        <div id="comparativeStatsGrid"></div>
+      </div>
+    </section>
+
+    <!-- RIGHT COLUMN: Modern Notification Panels (340px) -->
+    <aside class="notifications-column" id="notificationsColumn">
+      <div class="notif-segmented-header">
+        <div class="notif-segment-tabs" id="notifSegmentTabs">
+          <button class="nseg-tab active" data-nview="signals">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+            <span>Sinyaller</span>
+            <span class="nseg-badge" id="nsegCountSignals">0</span>
+          </button>
+          <button class="nseg-tab" data-nview="events">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
+            <span>Maç Olayları</span>
+            <span class="nseg-badge" id="nsegCountEvents">0</span>
+          </button>
+          <button class="nseg-tab" data-nview="both" title="İkisini Birlikte Göster">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="12" y1="3" x2="12" y2="21"></line></svg>
+            <span>İkili</span>
+          </button>
+        </div>
+        <button class="sidebar-collapse-btn" id="btnCollapseRight" title="Sağ Paneli Daralt">›</button>
+      </div>
+
+      <!-- PANEL 1: CANLI SİNYAL BİLDİRİMLERİ & TUTTU/TUTMADI KARNESİ -->
+      <div class="notif-panel signal-notif-panel" id="panelSignals">
+        <div class="notif-panel-header">
+          <div class="np-title">
+            <span class="np-icon-badge signal">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+            </span>
+            <div class="np-title-text-group">
+              <h3>Sinyal Takibi</h3>
+              <p class="np-subtitle">Tuttu / Tutmadı canlı takip</p>
+            </div>
+          </div>
+          <div class="np-actions">
+            <span class="np-count" id="signalNotifCount">0</span>
+            <button class="np-toggle active" id="toggleSignalNotifs" title="Canlı Sinyal Bildirimlerini Aç/Kapat">Aktif</button>
+            <button class="np-clear" id="btnClearSignals" title="Sinyal Bildirimlerini Temizle">Temizle</button>
+          </div>
+        </div>
+
+        <!-- Mini Signal Hit-Rate Scoreboard Strip -->
+        <div class="signal-scoreboard-strip" id="miniSignalScoreboard">
+          <button class="ssb-chip active" data-sig-filter="ALL" title="Tüm Sinyaller">
+            <span>Tümü</span>
+            <b id="ssbTotal">0</b>
+          </button>
+          <button class="ssb-chip won" data-sig-filter="WON" title="Tutan Sinyaller">
+            <span>Tuttu</span>
+            <b id="ssbWon">0</b>
+          </button>
+          <button class="ssb-chip lost" data-sig-filter="LOST" title="Tutmayan Sinyaller">
+            <span>Tutmadı</span>
+            <b id="ssbLost">0</b>
+          </button>
+          <button class="ssb-chip pending" data-sig-filter="PENDING" title="Devam Eden Aktif Sinyaller">
+            <span>Aktif</span>
+            <b id="ssbPending">0</b>
+          </button>
+          <div class="ssb-rate" title="Sonuçlanan Sinyallerde Başarı Oranı">
+            <span id="ssbRate">%0</span>
+          </div>
+        </div>
+
+        <div class="notif-stream" id="signalNotificationStream">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
+
+      <!-- PANEL 2: CANLI MAÇ OLAY BİLDİRİMLERİ -->
+      <div class="notif-panel match-notif-panel" id="panelEvents">
+        <div class="notif-panel-header">
+          <div class="np-title">
+            <span class="np-icon-badge event">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
+            </span>
+            <div class="np-title-text-group">
+              <h3>Maç Olayları</h3>
+              <p class="np-subtitle">Gol, kart ve şut akışı</p>
+            </div>
+          </div>
+          <div class="np-actions">
+            <span class="np-count" id="matchNotifCount">0</span>
+            <button class="np-clear" id="btnClearEvents" title="Maç Bildirimlerini Temizle">Temizle</button>
+          </div>
+        </div>
+
+        <!-- Customizable Match Event Type Toggles -->
+        <div class="event-filter-pills" id="eventCategoryToggles">
+          <button class="ef-pill active" data-cat="goal">Gol</button>
+          <button class="ef-pill active" data-cat="disallowed_goal">İptal Gol</button>
+          <button class="ef-pill active" data-cat="assist">Asist</button>
+          <button class="ef-pill active" data-cat="shot">Şut</button>
+          <button class="ef-pill active" data-cat="foul">Faul</button>
+          <button class="ef-pill active" data-cat="card">Kart</button>
+        </div>
+
+        <div class="notif-stream" id="matchNotificationStream">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <!-- ================= VIEW 2: FAVORİ MAÇLARIM DEDICATED VIEW ================= -->
+  <section class="full-view-container hidden" id="favoritesViewContainer">
+    <div class="full-view-inner">
+      <div class="full-view-header">
+        <div>
+          <span class="fv-eyebrow">KİŞİSEL İZLEME LİSTENİZ</span>
+          <h2>Favori Maçlarım</h2>
+          <p>Yıldızlanan maçların anlık skorları, şut istatistikleri ve sinyal durumları.</p>
+        </div>
+        <div class="fv-actions">
+          <span class="fv-count-pill" id="favViewCountPill">0 Favori Maç</span>
+        </div>
+      </div>
+      <div class="bento-grid" id="favoritesBentoGrid">
+        <!-- Populated dynamically -->
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= VIEW 3: CANLI SİNYAL RADARI DEDICATED VIEW ================= -->
+  <section class="full-view-container hidden" id="radarViewContainer">
+    <div class="full-view-inner">
+      <div class="full-view-header">
+        <div>
+          <span class="fv-eyebrow">CANLI SİNYALLER</span>
+          <h2>Canlı Sinyal Radarı</h2>
+          <p>Canlı sinyal sonuç karnesi ve hareketlenen karşılaşmalar.</p>
+        </div>
+        <div class="fv-actions">
+          <span class="fv-count-pill emerald" id="radarViewCountPill">0 Aktif Sinyal</span>
+        </div>
+      </div>
+
+      <!-- Full Signal Performance Scoreboard Banner -->
+      <div class="radar-kpi-banner" id="radarKpiBanner">
+        <div class="rkpi-card">
+          <span class="rkpi-label">TOPLAM SİNYAL</span>
+          <strong class="rkpi-val" id="rkpiTotal">0</strong>
+        </div>
+        <div class="rkpi-card won">
+          <span class="rkpi-label">TUTAN SİNYALLER</span>
+          <strong class="rkpi-val" id="rkpiWon">0</strong>
+        </div>
+        <div class="rkpi-card lost">
+          <span class="rkpi-label">TUTMAYAN SİNYALLER</span>
+          <strong class="rkpi-val" id="rkpiLost">0</strong>
+        </div>
+        <div class="rkpi-card pending">
+          <span class="rkpi-label">AKTİF BEKLEYEN</span>
+          <strong class="rkpi-val" id="rkpiPending">0</strong>
+        </div>
+        <div class="rkpi-card rate">
+          <span class="rkpi-label">BAŞARI ORANI</span>
+          <strong class="rkpi-val" id="rkpiRate">%0</strong>
+        </div>
+      </div>
+
+      <!-- Tracked Signals Ledger Section -->
+      <div class="radar-section-block">
+        <div class="radar-section-head">
+          <h3>Canlı Sinyal Sonuç Karnesi (Tuttu / Tutmadı)</h3>
+          <div class="radar-ledger-tabs" id="radarLedgerFilterTabs">
+            <button class="rl-tab active" data-rfilter="ALL">Tümü</button>
+            <button class="rl-tab" data-rfilter="PENDING">Aktif</button>
+            <button class="rl-tab" data-rfilter="WON">Tutanlar</button>
+            <button class="rl-tab" data-rfilter="LOST">Tutmayanlar</button>
+          </div>
+        </div>
+        <div class="bento-grid" id="radarLedgerGrid">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
+
+      <!-- Currently Live Signal / Watchlist Matches -->
+      <div class="radar-section-block">
+        <div class="radar-section-head">
+          <h3>Şu An Hareketlenen Canlı Maçlar</h3>
+        </div>
+        <div class="bento-grid" id="radarBentoGrid">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Floating Toast Notifications -->
+  <div class="toast-stack" id="toastStack"></div>
+
+  <!-- Application Core Engines -->
+  <script src="/js/i18n.js?v=6.3.0-bilingual"></script>
+  <script src="/js/soundEngine.js?v=6.3.0-bilingual"></script>
+  <script src="/js/app.js?v=6.3.0-bilingual"></script>
+</body>
+</html>
