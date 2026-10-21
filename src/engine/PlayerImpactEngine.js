@@ -77,8 +77,38 @@ class PlayerImpactEngine {
       }
     }
 
-    // 2. Enrich from live incidents (Goals, Assists, Cards, Disallowed Goals)
+    // 2. Enrich from live incidents (Goals, Assists, Cards, Disallowed Goals, Substitutions)
     for (const inc of (match.incidents || [])) {
+      if (inc.eventType === 'SUBSTITUTION') {
+        const subInName = inc.playerIn || inc.subIn || inc.playerName;
+        const subOutName = inc.playerOut || inc.subOut;
+        const subMin = inc.minute || 0;
+
+        if (subInName) {
+          const subInPlayer = upsertPlayer(subInName, inc.team, {
+            position: 'F',
+            rating: 6.8
+          });
+          if (subInPlayer) {
+            subInPlayer.recentActionMinute = Math.max(subInPlayer.recentActionMinute, subMin);
+            subInPlayer.isSubIn = true;
+            subInPlayer.subMinute = subMin;
+            if (subMin >= 60) {
+              subInPlayer.isFreshAttacker = true;
+            }
+          }
+        }
+
+        if (subOutName) {
+          const subOutPlayer = upsertPlayer(subOutName, inc.team, { position: 'M' });
+          if (subOutPlayer) {
+            subOutPlayer.isSubOut = true;
+            subOutPlayer.subMinute = subMin;
+          }
+        }
+        continue;
+      }
+
       const p = upsertPlayer(inc.playerName, inc.team, {
         position: inc.eventType === 'GOAL' ? 'F' : (inc.eventType.includes('CARD') ? 'D' : 'M')
       });
@@ -138,6 +168,8 @@ class PlayerImpactEngine {
     const scoredPlayers = rawPlayers.map(p => {
       const deltaMin = p.recentActionMinute > 0 ? Math.max(0, minute - p.recentActionMinute) : 15;
       const decayMult = deltaMin <= 12 ? 1.30 : (deltaMin <= 28 ? 1.00 : 0.72);
+      const isFreshAttacker = Boolean(p.isFreshAttacker);
+      const freshMult = isFreshAttacker ? 1.25 : 1.0;
 
       // 1. Threat Index (TI)
       const rawTi = (
@@ -149,7 +181,7 @@ class PlayerImpactEngine {
         p.keyPasses * 2.2 +
         p.dribblesSuccess * 4.2 +
         p.foulsDrawn * 3.5
-      ) * decayMult + ((p.rating - 6.5) * 8.0);
+      ) * decayMult * freshMult + ((p.rating - 6.5) * 8.0) + (isFreshAttacker ? 5.0 : 0);
 
       // 2. Playmaker Index (PI)
       const rawPi = (
@@ -230,6 +262,10 @@ class PlayerImpactEngine {
 
     const threatLeader = [...scoredPlayers].sort((a, b) => b.tiScore - a.tiScore)[0] || null;
 
+    const freshAttackers = scoredPlayers.filter(p => p.isFreshAttacker);
+    const freshAttackersHome = freshAttackers.filter(p => p.team === 'HOME');
+    const freshAttackersAway = freshAttackers.filter(p => p.team === 'AWAY');
+
     return {
       threatLeader: threatLeader && threatLeader.tiScore >= 10 ? threatLeader : null,
       playmakerLeader: topPlaymaker && topPlaymaker.piScore >= 10 ? topPlaymaker : null,
@@ -241,6 +277,10 @@ class PlayerImpactEngine {
       teamDefVulnAway: Math.round(teamDefVulnAway),
       matchupMultHome,
       matchupMultAway,
+      freshAttackers,
+      freshAttackersHome,
+      freshAttackersAway,
+      hasFreshAttackingPersonnel: freshAttackers.length > 0,
       players: scoredPlayers.slice(0, 24)
     };
   }

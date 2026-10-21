@@ -17,8 +17,8 @@ class EspnScraper {
   constructor() {
     this.baseUrl = 'https://site.api.espn.com/apis/site/v2/sports/soccer/all';
     this.uaIndex = 0;
-    this.timeoutMs = 6000;
-    this.maxRetries = 1;
+    this.timeoutMs = 4500;
+    this.maxRetries = 2;
     this.headers = {
       'Accept': 'application/json',
       'Accept-Encoding': 'gzip, deflate',
@@ -53,7 +53,9 @@ class EspnScraper {
       } catch (err) {
         lastError = err;
         if (attempt < maxRetries) {
-          await new Promise(resolve => setTimeout(resolve, 200));
+          const jitter = Math.floor(Math.random() * 180) + 70;
+          const delay = 150 * Math.pow(2, attempt) + jitter;
+          await new Promise(resolve => setTimeout(resolve, delay));
         }
       }
     }
@@ -142,8 +144,9 @@ class EspnScraper {
       const extractInlineStats = (compObj) => {
         const s = {
           possession: 50, totalShots: 0, shotsOnTarget: 0, shotsOffTarget: 0,
-          blockedShots: 0, corners: 0, fouls: 0, yellowCards: 0, redCards: 0,
-          offsides: 0, saves: 0, dangerousAttacks: 0, xg: 0
+          blockedShots: 0, shotsInsideBox: 0, shotsOutsideBox: 0, bigChances: 0, woodwork: 0,
+          corners: 0, fouls: 0, yellowCards: 0, redCards: 0,
+          offsides: 0, freeKicks: 0, touchesInBox: 0, saves: 0, attacks: 0, dangerousAttacks: 0, substitutions: 0, xg: 0
         };
         for (const item of (compObj.statistics || [])) {
           const name = (item.name || '').toLowerCase();
@@ -151,12 +154,20 @@ class EspnScraper {
           if (name.includes('possession')) s.possession = val;
           else if (name === 'totalshots' || name === 'shots') s.totalShots = val;
           else if (name === 'shotsontarget' || name === 'shotsongoal') s.shotsOnTarget = val;
+          else if (name.includes('blocked')) s.blockedShots = val;
+          else if (name.includes('inside') || name.includes('shotsinside')) s.shotsInsideBox = val;
+          else if (name.includes('outside') || name.includes('shotsoutside')) s.shotsOutsideBox = val;
           else if (name.includes('foul')) s.fouls = val;
           else if (name.includes('corner')) s.corners = val;
           else if (name.includes('yellow')) s.yellowCards = val;
           else if (name.includes('red')) s.redCards = val;
           else if (name.includes('offside')) s.offsides = val;
+          else if (name.includes('freekick') || name.includes('free kick')) s.freeKicks = val;
           else if (name.includes('save')) s.saves = val;
+          else if (name.includes('dangerous')) s.dangerousAttacks = val;
+          else if (name === 'attacks' || (name.includes('attack') && !name.includes('dangerous'))) s.attacks = val;
+          else if (name.includes('substitution') || name === 'subs') s.substitutions = val;
+          else if (name.includes('xg') || name.includes('expected')) s.xg = val;
         }
         if (s.totalShots > s.shotsOnTarget) {
           s.shotsOffTarget = s.totalShots - s.shotsOnTarget;
@@ -203,18 +214,33 @@ class EspnScraper {
           eventType = 'RED_CARD';
         } else if (det.yellowCard || typeText.includes('yellow card')) {
           eventType = 'YELLOW_CARD';
+        } else if (typeText.includes('substitution') || typeText.includes('sub')) {
+          eventType = 'SUBSTITUTION';
         }
 
         if (eventType !== 'OTHER') {
+          const isSub = eventType === 'SUBSTITUTION';
+          const pIn = det.athletesInvolved?.[0]?.displayName || athlete;
+          const pOut = det.athletesInvolved?.[1]?.displayName || null;
+          const pInId = det.athletesInvolved?.[0]?.id || null;
+          const pOutId = det.athletesInvolved?.[1]?.id || null;
+
           inlineIncidents.push({
             id: `espn_inc_${ev.id}_${incMin}_${eventType}_${athlete}`,
             eventType,
             minute: incMin,
             addedTime: 0,
             team: side,
-            playerName: athlete,
+            playerName: isSub ? pIn : athlete,
+            playerId: isSub ? pInId : (det.athletesInvolved?.[0]?.id || null),
             assistPlayerName: assistAthlete,
-            reason: det.type?.text || ''
+            playerIn: isSub ? pIn : null,
+            playerOut: isSub ? pOut : null,
+            playerInId: isSub ? pInId : null,
+            playerOutId: isSub ? pOutId : null,
+            subIn: isSub ? pIn : null,
+            subOut: isSub ? pOut : null,
+            reason: det.type?.text || (isSub ? 'Oyuncu Değişikliği' : '')
           });
         }
       }
@@ -286,22 +312,30 @@ class EspnScraper {
       const parseTeamBox = (tObj) => {
         const s = {
           possession: 50, totalShots: 0, shotsOnTarget: 0, shotsOffTarget: 0,
-          blockedShots: 0, corners: 0, fouls: 0, yellowCards: 0, redCards: 0,
-          offsides: 0, saves: 0, dangerousAttacks: 0, xg: 0
+          blockedShots: 0, shotsInsideBox: 0, shotsOutsideBox: 0, bigChances: 0, woodwork: 0,
+          corners: 0, fouls: 0, yellowCards: 0, redCards: 0,
+          offsides: 0, freeKicks: 0, touchesInBox: 0, saves: 0, attacks: 0, dangerousAttacks: 0, substitutions: 0, xg: 0
         };
         for (const st of (tObj.statistics || [])) {
           const name = (st.name || '').toLowerCase();
           const val = parseFloat(st.displayValue || '0') || 0;
           if (name.includes('possession')) s.possession = val;
-          else if (name === 'totalshots') s.totalShots = val;
-          else if (name === 'shotsontarget') s.shotsOnTarget = val;
+          else if (name === 'totalshots' || name === 'shots') s.totalShots = val;
+          else if (name === 'shotsontarget' || name === 'shotsongoal') s.shotsOnTarget = val;
           else if (name.includes('blocked')) s.blockedShots = val;
+          else if (name.includes('inside') || name.includes('shotsinside')) s.shotsInsideBox = val;
+          else if (name.includes('outside') || name.includes('shotsoutside')) s.shotsOutsideBox = val;
           else if (name.includes('foul')) s.fouls = val;
           else if (name.includes('corner')) s.corners = val;
           else if (name.includes('yellow')) s.yellowCards = val;
           else if (name.includes('red')) s.redCards = val;
           else if (name.includes('offside')) s.offsides = val;
+          else if (name.includes('freekick') || name.includes('free kick')) s.freeKicks = val;
           else if (name.includes('save')) s.saves = val;
+          else if (name.includes('dangerous')) s.dangerousAttacks = val;
+          else if (name === 'attacks' || (name.includes('attack') && !name.includes('dangerous'))) s.attacks = val;
+          else if (name.includes('substitution') || name === 'subs') s.substitutions = val;
+          else if (name.includes('xg') || name.includes('expected')) s.xg = val;
         }
         if (s.totalShots > s.shotsOnTarget + s.blockedShots) {
           s.shotsOffTarget = s.totalShots - s.shotsOnTarget - s.blockedShots;
@@ -335,6 +369,27 @@ class EspnScraper {
           isOnTarget,
           shotType: isOnTarget ? 'onTarget' : 'miss',
           xg: isOnTarget ? '0.14' : '0.05'
+        });
+      }
+
+      if (typeText.includes('substitution') || typeText.includes('sub')) {
+        const subIn = play.participants?.[0]?.athlete?.displayName || player;
+        const subOut = play.participants?.[1]?.athlete?.displayName || null;
+        result.incidents.push({
+          id: `espn_sub_${play.id || min}_${subIn}`,
+          eventType: 'SUBSTITUTION',
+          minute: min,
+          addedTime: 0,
+          team: side,
+          playerName: subIn,
+          playerId: play.participants?.[0]?.athlete?.id || null,
+          playerIn: subIn,
+          playerOut: subOut,
+          playerInId: play.participants?.[0]?.athlete?.id || null,
+          playerOutId: play.participants?.[1]?.athlete?.id || null,
+          subIn,
+          subOut,
+          reason: text || 'Oyuncu Değişikliği'
         });
       }
 

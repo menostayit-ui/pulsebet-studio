@@ -1,23 +1,23 @@
 /**
- * PulseBet Studio — Elite Tactical Match Momentum, Narrative & Archetype Engine (V6)
- * Features:
- *  - 1-1 Score Tactical Psychology & Breakdown Models:
- *      * SECOND_HALF_DRAW_BREAKOUT_HOME (Ev Sahibi 1-1 Beraberliği Bozma Kuşatması)
- *      * SECOND_HALF_DRAW_BREAKOUT_AWAY (Deplasman 1-1 Kontra & Delme Baskısı)
- *      * TACTICAL_STALEMATE_DRAW (1-1 Taktiksel Kilit, 1 Puan Hesabı & 2.5 Alt Gidişatı)
- *      * HALFTIME_DRAW_BREAKOUT_HOME / AWAY / DEADLOCK (Devre Arası 1-1 Analizleri)
- *  - Shot Quality Weights & Danger Calibration:
+ * PulseBet Studio — Elite Tactical Match Momentum, Narrative & Archetype Engine (V7)
+ * Institutional Quantitative Architecture:
+ *  - High-Danger Index (HDI): Dynamic shot danger metric:
  *      * Inside-Box Shots: 2.50x
  *      * Shots On Target: 1.80x
- *      * Big Chances: 2.80x
  *      * Woodwork: 1.60x
- *      * Corner Siege & Clustering Boost: 0.85x + 1.15x
- *  - 4-Dimensional Evidence Matrix for 1-1 Draws (`evidenceFactors`):
- *      1. ATTACK_QUALITY (1-1'de Takımların Ceza Sahasına Nüfuz ve Şut Kalitesi)
- *      2. DRAW_PRESSURE (Beraberliği Bozma İsteği & Son 10 Dk Hücum İvmesi)
- *      3. DEFENSIVE_RESISTANCE (Savunma Direnci, DPI Panik Endeksi & Faul Dağılımı)
- *      4. NEXT_GOAL_PROJECTION (Sıradaki 3. Gol Yönü veya 2.5 Alt / 1-1 Bitiş)
- *  - Period Separation (half1 / half2) eliminating legacy illusion
+ *      * Big Chances: 2.80x
+ *  - Corner Cluster Surge Model (CCSM):
+ *      * 2+ corners in 5m or 3+ corners in 10m rolling window
+ *      * Evaluates set-piece siege pressure and injects +22% to +35% goal expectancy boost
+ *  - Late Game Volatility Index (LGV):
+ *      * Minutes 68-88 with 1-goal margin (1-0, 0-1, 2-1, 1-2)
+ *      * Trailing team equalizer surge (IGP >= 65 + dangerous attack surge)
+ *      * Leading team counter-attack boost on trailing team reckless turnovers/fouls
+ *  - Strict False-Positive Dampers:
+ *      * 1-1 Draw Guard: 1-1 tactical stalemate under 2.5 bias, 3.5 Over strictly prohibited
+ *      * Blowout Cruise-Control: Exponential residual damping on 3+ margin or late 2-goal leads
+ *      * Red Card dynamic penalty (rho = 0.55 penalty, +32% opposition boost)
+ *  - Period Separation (half1 / half2) eliminating legacy cumulative illusion
  */
 
 class MatchMomentumEngine {
@@ -25,19 +25,151 @@ class MatchMomentumEngine {
     return Math.max(min, Math.min(max, val));
   }
 
+  /**
+   * High-Danger Index (HDI):
+   * Dynamic shot danger metric combining:
+   *  - Inside-Box Shots (2.50x)
+   *  - Shots On Target (1.80x)
+   *  - Woodwork (1.60x)
+   *  - Big Chances (2.80x)
+   */
+  computeHighDangerIndex(stats = {}) {
+    const sot = stats.shotsOnTarget || 0;
+    const cor = stats.corners || 0;
+    const box = stats.shotsInsideBox != null ? stats.shotsInsideBox : Math.round(0.62 * sot + 0.35 * cor);
+    const wood = stats.woodwork || 0;
+    const bc = stats.bigChances || 0;
+    const hdi = (2.50 * box) + (1.80 * sot) + (1.60 * wood) + (2.80 * bc);
+    return Number(hdi.toFixed(2));
+  }
+
+  /**
+   * Corner Cluster Surge Model (CCSM):
+   * Evaluates set-piece pressure when a team earns:
+   *  - 2+ corners in a 5-minute rolling window, OR
+   *  - 3+ corners in a 10-minute rolling window
+   * Injects a +22% to +35% goal expectancy boost into remaining lambda.
+   */
+  evaluateCornerClusterSurge(d5 = {}, d10 = {}) {
+    const c5 = d5.corners || 0;
+    const c10 = d10.corners || 0;
+    const da5 = d5.dangerousAttacks || 0;
+    const blk5 = d5.blockedShots || 0;
+
+    const isCluster = c5 >= 2 || c10 >= 3;
+    if (!isCluster) {
+      return {
+        active: false,
+        boost: 1.0,
+        corners5m: c5,
+        corners10m: c10,
+        pressureIntensity: 0
+      };
+    }
+
+    const excess5 = Math.max(0, c5 - 2);
+    const excess10 = Math.max(0, c10 - 3);
+    const pressureIntensity = Math.min(
+      1.0,
+      (excess5 * 0.50) + (excess10 * 0.30) + (Math.min(1.0, da5 / 3.0) * 0.20) + (Math.min(1.0, blk5 / 2.0) * 0.20)
+    );
+    const boost = Number((1.22 + 0.13 * pressureIntensity).toFixed(3));
+    return {
+      active: true,
+      boost,
+      corners5m: c5,
+      corners10m: c10,
+      pressureIntensity: Number(pressureIntensity.toFixed(2))
+    };
+  }
+
+  /**
+   * Late Game Volatility Index (LGV):
+   * In minutes 68-88 when a match has a 1-goal margin (1-0, 0-1, 2-1, 1-2):
+   *  - If the trailing team has IGP >= 65 and dangerous attack surge, boost trailing team equalizer lambda.
+   *  - If the trailing team commits reckless turnovers (high fouls/turnovers), boost counter-attack goal lambda for the leading team.
+   */
+  evaluateLateGameVolatility(match, d5, d10, gpiH, gpiA, igpH, igpA) {
+    const minute = match.minute || 0;
+    const isLive = match.status === 'LIVE';
+    if (!isLive || minute < 68 || minute > 88) {
+      return { active: false, equalizerBoost: 1.0, counterBoost: 1.0, regime: 'NONE' };
+    }
+
+    const scoreH = match.home?.score || 0;
+    const scoreA = match.away?.score || 0;
+    const scoreDiff = scoreH - scoreA;
+    const absDiff = Math.abs(scoreDiff);
+    if (absDiff !== 1) {
+      return { active: false, equalizerBoost: 1.0, counterBoost: 1.0, regime: 'NONE' };
+    }
+
+    const homeLeading = scoreDiff === 1;
+    const trailSide = homeLeading ? 'AWAY' : 'HOME';
+    const leadSide = homeLeading ? 'HOME' : 'AWAY';
+    const trailIgp = homeLeading ? igpA : igpH;
+    const trailD5 = homeLeading ? (d5?.away || {}) : (d5?.home || {});
+    const trailD10 = homeLeading ? (d10?.away || {}) : (d10?.home || {});
+
+    // Condition A: Trailing team equalizer surge (IGP >= 65 and dangerous attack surge)
+    const daSurge = (trailD5.dangerousAttacks >= 2) ||
+      (trailD10.dangerousAttacks >= 4) ||
+      (trailD5.totalShots >= 2) ||
+      (trailD5.corners >= 1) ||
+      (trailD10.shotsInsideBox >= 1);
+    const isEqualizerSurge = trailIgp >= 65 && daSurge;
+
+    // Condition B: Trailing team reckless turnovers / desperate fouls
+    const recklessTurnovers = (trailD5.fouls >= 2) ||
+      (trailD10.fouls >= 4) ||
+      (trailD10.yellowCards >= 1);
+    const isCounterSurge = recklessTurnovers;
+
+    let equalizerBoost = 1.0;
+    if (isEqualizerSurge) {
+      const igpExcess = Math.min(1.0, (trailIgp - 65) / 20.0);
+      equalizerBoost = Number((1.25 + 0.20 * igpExcess).toFixed(3)); // +25% to +45% boost
+    }
+
+    let counterBoost = 1.0;
+    if (isCounterSurge) {
+      const foulDensity = Math.min(1.0, ((trailD5.fouls || 0) + (trailD10.yellowCards || 0)) / 3.0);
+      counterBoost = Number((1.20 + 0.18 * foulDensity).toFixed(3)); // +20% to +38% boost
+    }
+
+    const active = isEqualizerSurge || isCounterSurge;
+    let regime = 'NONE';
+    if (isEqualizerSurge && isCounterSurge) regime = 'BILATERAL_ENDGAME_CHAOS';
+    else if (isEqualizerSurge) regime = 'EQUALIZER_SIEGE';
+    else if (isCounterSurge) regime = 'COUNTER_ATTACK_OPPORTUNITY';
+
+    return {
+      active,
+      regime,
+      trailSide,
+      leadSide,
+      trailTeam: homeLeading ? match.away?.name : match.home?.name,
+      leadTeam: homeLeading ? match.home?.name : match.away?.name,
+      equalizerBoost,
+      counterBoost,
+      isEqualizerSurge,
+      isCounterSurge
+    };
+  }
+
   estimateTeamXg(stats = {}, oppStats = {}) {
     if (stats.xg && stats.xg > 0.05) return Number(stats.xg.toFixed(2));
     const sot = stats.shotsOnTarget || 0;
     const soff = stats.shotsOffTarget || 0;
     const blk = stats.blockedShots || 0;
-    const box = stats.shotsInsideBox || Math.round(0.62 * sot + 0.35 * (stats.corners || 0));
+    const box = stats.shotsInsideBox != null ? stats.shotsInsideBox : Math.round(0.62 * sot + 0.35 * (stats.corners || 0));
     const outBox = Math.max(0, (stats.totalShots || 0) - box);
     const bc = stats.bigChances || 0;
     const wood = stats.woodwork || 0;
     const cor = stats.corners || 0;
     const oppSaves = oppStats.saves || Math.max(0, sot - (stats.goals || 0));
 
-    // Bayesian xG calibrated with shot quality weights: Inside-Box (2.5x), SOT (1.8x), Woodwork (1.6x), Big Chance (2.8x)
+    // Bayesian xG calibrated with High-Danger Index (HDI) components: Box (2.5x), SOT (1.8x), Woodwork (1.6x), Big Chance (2.8x)
     const est = (0.135 * sot) +
       (0.125 * box) +
       (0.330 * bc) +
@@ -54,28 +186,20 @@ class MatchMomentumEngine {
     const sot = w.shotsOnTarget || 0;
     const soff = w.shotsOffTarget || 0;
     const blk = w.blockedShots || 0;
-    const box = w.shotsInsideBox || Math.round(0.62 * sot + 0.35 * (w.corners || 0));
-    const bc = w.bigChances || 0;
-    const wood = w.woodwork || 0;
     const cor = w.corners || 0;
     const da = w.dangerousAttacks || 0;
 
-    // Shot Quality weights: Ceza sahası içi şut 2.5x, İsabetli şut 1.8x, Direkten dönen 1.6x, Net gol pozisyonu 2.8x
-    let sts = (2.50 * box) +
-      (1.80 * sot) +
-      (2.80 * bc) +
-      (1.60 * wood) +
-      (0.85 * blk) +
-      (0.45 * soff) +
-      (0.95 * cor) +
-      (0.08 * da);
+    // High-Danger Index (HDI): Inside-Box 2.5x, SOT 1.8x, Woodwork 1.6x, Big Chance 2.8x
+    const hdi = this.computeHighDangerIndex(w);
+    let sts = hdi + (0.85 * blk) + (0.45 * soff) + (0.95 * cor) + (0.08 * da);
 
-    // Corner clustering: Ceza sahası üzerinde üst üste gelen duran top baskısı
+    // Corner Cluster Surge Model (CCSM):
+    // 2+ corners in rolling window injects set-piece pressure boost
     if (cor >= 2) {
       sts += 0.85 * (cor - 1);
     }
     if (cor >= 3) {
-      sts += 1.15; // Korner ablukası ekstra ivmesi
+      sts += 1.15; // Set-piece siege clustering acceleration
     }
     return sts;
   }
@@ -86,9 +210,10 @@ class MatchMomentumEngine {
 
     const sot = stats.shotsOnTarget || 0;
     const cor = stats.corners || 0;
-    const box = stats.shotsInsideBox || Math.round(0.62 * sot + 0.35 * cor);
+    const box = stats.shotsInsideBox != null ? stats.shotsInsideBox : Math.round(0.62 * sot + 0.35 * cor);
     const bc = stats.bigChances || 0;
     const wood = stats.woodwork || 0;
+    const hdi = this.computeHighDangerIndex(stats);
 
     const rBox = box / tot;
     let alphaBox = 1.0;
@@ -100,8 +225,8 @@ class MatchMomentumEngine {
     if (rEff >= 0.50) alphaEff = 1.20;
     else if (rEff < 0.22 && tot >= 5) alphaEff = 0.80;
 
-    // High danger impact boost incorporating 2.8x big chances and 1.6x woodwork
-    const dangerBoost = Math.min(0.25, 0.08 * (bc * (2.8 / 2.0) + wood * (1.6 / 2.0)));
+    // High danger impact boost incorporating High-Danger Index (HDI)
+    const dangerBoost = Math.min(0.25, 0.08 * (bc * (2.8 / 2.0) + wood * (1.6 / 2.0)) + 0.015 * Math.min(3, hdi / Math.max(1, tot * 2.5)));
     return { alphaBox: Number((alphaBox + dangerBoost).toFixed(3)), alphaEff };
   }
 
@@ -350,9 +475,9 @@ class MatchMomentumEngine {
   }
 
   /**
-   * Detect Specific In-Play Signal Hunter Archetype (12 Total States including 5 New V5 Sniper Archetypes)
+   * Detect Specific In-Play Signal Hunter Archetype (12 Total States + V7 Late Game Volatility Index)
    */
-  detectArchetypeAndNarrative(match, gpiHome, gpiAway, dpiHome, dpiAway, igpHome, igpAway, pace, d5, d10, periodInfo) {
+  detectArchetypeAndNarrative(match, gpiHome, gpiAway, dpiHome, dpiAway, igpHome, igpAway, pace, d5, d10, periodInfo, lgv = null, ccsm = null) {
     const hS = match.home.stats || {};
     const aS = match.away.stats || {};
     const totShots = (hS.totalShots || 0) + (aS.totalShots || 0);
@@ -499,7 +624,34 @@ class MatchMomentumEngine {
       };
     }
 
-    // 5. Late Game Lock (Minute 75 - 89)
+    // 4c. Late Game Volatility Index (LGV) - Minutes 68-88 with 1-goal margin
+    if (lgv && lgv.active && min >= 68 && min <= 88 && absDiff === 1) {
+      const trailT = lgv.trailTeam || 'Gerideki Takım';
+      const leadT = lgv.leadTeam || 'Öndeki Takım';
+      if (lgv.regime === 'BILATERAL_ENDGAME_CHAOS') {
+        return {
+          archetype: 'LATE_GAME_VOLATILITY',
+          archetypeLabel: `Geç Oyun Volatilitesi: Beraberlik Kuşatması & Kontra (${min}')`,
+          narrative: `Geç Oyun Volatilitesi: 1 farklı skor dezavantajındaki ${trailT} tüm hatlarıyla yükleniyor (IGP: ${Math.max(igpHome, igpAway)}/100, tehlikeli atak dalgası). Savunma arkasındaki açık alanlar ${leadT} için öldürücü kontra fırsatları yaratıyor; geç oyun gol beklentisi tavan yaptı.`
+        };
+      }
+      if (lgv.regime === 'EQUALIZER_SIEGE') {
+        return {
+          archetype: 'LATE_GAME_VOLATILITY_EQUALIZER',
+          archetypeLabel: `Geç Oyun Beraberlik Baskısı (${trailT})`,
+          narrative: `Geç Oyun Beraberlik Baskısı: 1 gol gerideki ${trailT} son bölümde ceza sahası ablukası kurdu (IGP: ${Math.max(igpHome, igpAway)}/100); beraberlik golü için riskler maksimize edildi (+%${Math.round((lgv.equalizerBoost - 1) * 100)} İvme).`
+        };
+      }
+      if (lgv.regime === 'COUNTER_ATTACK_OPPORTUNITY') {
+        return {
+          archetype: 'LATE_GAME_VOLATILITY_COUNTER',
+          archetypeLabel: `Geç Oyun Kontra Tehdidi (${leadT})`,
+          narrative: `Geç Oyun Kontra Tehdidi: Gerideki ${trailT} panik faulleri ve top kayıplarıyla savunma dengesini yitirdi; öndeki ${leadT} için kontra atak golü beklentisi zirvede (+%${Math.round((lgv.counterBoost - 1) * 100)} İvme).`
+        };
+      }
+    }
+
+    // 5. Late Game Lock (Minute 75 - 89, when not in active LGV volatility)
     if (min >= 75) {
       return {
         archetype: 'LATE_GAME_LOCK',
@@ -751,7 +903,7 @@ class MatchMomentumEngine {
    * Build 3-to-5-Dimensional Analytical Proof Array (`evidenceFactors`) for UI & Signal Explainability
    * Strictly produces between 3 and 5 evidence factors for every archetype.
    */
-  buildEvidenceFactors(match, gpiHome, gpiAway, dpiHome, dpiAway, igpHome, igpAway, pace, d5, d10, periodInfo, archetype = 'MONITORING') {
+  buildEvidenceFactors(match, gpiHome, gpiAway, dpiHome, dpiAway, igpHome, igpAway, pace, d5, d10, periodInfo, archetype = 'MONITORING', lgv = null, ccsm = null) {
     const hS = match.home?.stats || {};
     const aS = match.away?.stats || {};
     const scoreH = match.home?.score || 0;
@@ -910,16 +1062,69 @@ class MatchMomentumEngine {
       ];
     }
 
+    // 4c. LATE_GAME_VOLATILITY Evidence Matrix (Minutes 68-88 with 1-goal margin)
+    if (archetype.startsWith('LATE_GAME_VOLATILITY')) {
+      const isEq = lgv?.isEqualizerSurge;
+      const isCnt = lgv?.isCounterSurge;
+      const trailT = lgv?.trailTeam || 'Gerideki Takım';
+      const leadT = lgv?.leadTeam || 'Öndeki Takım';
+      const eqBoost = lgv ? Math.round((lgv.equalizerBoost - 1) * 100) : 30;
+      const cntBoost = lgv ? Math.round((lgv.counterBoost - 1) * 100) : 24;
+      const hdiHVal = this.computeHighDangerIndex(hS);
+      const hdiAVal = this.computeHighDangerIndex(aS);
+
+      return [
+        {
+          key: 'LGV_VOLATILITY_SURGE',
+          title: 'Geç Oyun Volatilitesi (68-88)',
+          badge: isEq && isCnt ? 'Çift Yönlü Kaos' : (isEq ? 'Beraberlik Baskısı' : 'Kontra Tehdidi'),
+          summary: isEq && isCnt
+            ? `${trailT} beraberlik için yüklenirken (+%${eqBoost} eşitlik lambda boost'u), açık alanlar ${leadT} için ölümcül kontra fırsatı yaratıyor (+%${cntBoost} kontra ivmesi).`
+            : (isEq
+              ? `${trailT} 1 farklı skoru eşitlemek için yoğun ceza sahası baskısı kurdu (+%${eqBoost} eşitlik lambda boost'u, IGP: ${Math.max(igpHome, igpAway)}).`
+              : `${trailT} panik faulleri ve top kayıplarıyla savunma dengesini yitirdi; ${leadT} hızlı geçişlerle kontra golüne çok yakın (+%${cntBoost} kontra ivmesi).`),
+          score: Math.round(this.clamp(72, 98, Math.max(igpHome, igpAway) * 0.85 + (isEq ? 15 : 0) + (isCnt ? 12 : 0))),
+          tone: 'rose'
+        },
+        {
+          key: 'ATTACK_QUALITY',
+          title: 'Ceza Sahası Tehlike Endeksi (HDI)',
+          badge: (hdiHVal + hdiAVal) >= 12 ? 'Çok Yüksek' : 'Aktif',
+          summary: `Ceza sahası içi şut: Ev ${hS.shotsInsideBox || 0} • Dep ${aS.shotsInsideBox || 0} (HDI: Ev ${hdiHVal} • Dep ${hdiAVal}) • ${totSot} isabetli şut`,
+          score: Math.round(this.clamp(40, 98, (hdiHVal + hdiAVal) * 4.5)),
+          tone: 'emerald'
+        },
+        {
+          key: 'DEFENSIVE_RESISTANCE',
+          title: 'Savunma Direnci & Panik (DPI)',
+          badge: Math.max(dpiHome, dpiAway) >= 64 ? 'Ağır Panik' : 'Zorlanıyor',
+          summary: `${dpiHome >= dpiAway ? (match.home?.name || 'Ev') : (match.away?.name || 'Dep')} savunması gerideki baskı altında hata riski taşıyor (DPI: ${Math.max(dpiHome, dpiAway)}/100).`,
+          score: Math.max(dpiHome, dpiAway),
+          tone: Math.max(dpiHome, dpiAway) >= 64 ? 'rose' : 'amber'
+        },
+        {
+          key: 'NEXT_GOAL_PROJECTION',
+          title: 'Geç Oyun Gol Projeksiyonu',
+          badge: isEq ? `Sıradaki Gol ${trailT}` : `Sıradaki Gol ${leadT}`,
+          summary: `Dakika ${match.minute || 0}' itibarıyla geç oyun volatilite dinamikleri devrede; karşılaşmanın bu skorla (${scoreH}-${scoreA}) bitmeme ve gol çıkma olasılığı yüksek (%84 Güven).`,
+          score: 85,
+          tone: 'emerald'
+        }
+      ];
+    }
+
     const xgH = this.estimateTeamXg(hS, aS);
     const xgA = this.estimateTeamXg(aS, hS);
     const boxH = hS.shotsInsideBox || Math.round(0.62 * (hS.shotsOnTarget || 0) + 0.35 * (hS.corners || 0));
     const boxA = aS.shotsInsideBox || Math.round(0.62 * (aS.shotsOnTarget || 0) + 0.35 * (aS.corners || 0));
     const bcTot = (hS.bigChances || 0) + (aS.bigChances || 0);
     const woodTot = (hS.woodwork || 0) + (aS.woodwork || 0);
+    const hdiH = this.computeHighDangerIndex(hS);
+    const hdiA = this.computeHighDangerIndex(aS);
 
     // 1. ATTACK_QUALITY (Pozisyon & xG Kalitesi - Ceza sahası 2.5x, İsabet 1.8x, Direk 1.6x, Net Fırsat 2.8x)
     const qualityScore = Math.round(this.clamp(10, 99, (xgH + xgA) * 26 + (boxH + boxA) * 3.5 + totSot * 5 + bcTot * 12 + woodTot * 10));
-    const attackSummary = `Ceza sahası içi şut: Ev ${boxH} • Dep ${boxA}` +
+    const attackSummary = `Ceza sahası içi şut: Ev ${boxH} • Dep ${boxA} (HDI: Ev ${hdiH} • Dep ${hdiA})` +
       (bcTot + woodTot > 0 ? ` (${bcTot} net pozisyon, ${woodTot} direk)` : '') +
       ` • Toplam ${totSot} isabetli şut`;
 
@@ -1283,17 +1488,31 @@ class MatchMomentumEngine {
     const d5 = periodInfo.effD5;
     const d10 = periodInfo.effD10;
 
-    // Score-State Decay for teams leading by 2+ goals after 58' (prevents first-half cumulative stats from faking late pressure)
+    // Blowout Cruise-Control Damping:
+    // When margin >= 3 or late 2-goal leads with reduced pace, exponentially damp residual pressure
     const scoreDiff = (match.home.score || 0) - (match.away.score || 0);
     const absDiff = Math.abs(scoreDiff);
     let decayH = 1.0;
     let decayA = 1.0;
-    if (absDiff >= 3 && minute >= 52) {
-      if (scoreDiff > 0) decayH = 0.32;
-      else decayA = 0.32;
-    } else if (absDiff === 2 && minute >= 58) {
-      if (scoreDiff > 0 && (d10.home.shotsOnTarget || 0) <= 1) decayH = 0.50;
-      if (scoreDiff < 0 && (d10.away.shotsOnTarget || 0) <= 1) decayA = 0.50;
+    if (absDiff >= 3) {
+      // Blowout Cruise-Control: Exponential damping on 3+ goal margins
+      const blowoutDecay = Math.max(0.12, 0.38 * Math.exp(-0.045 * Math.max(1, minute - 30)));
+      decayH = blowoutDecay;
+      decayA = blowoutDecay;
+    } else if (absDiff === 2 && minute >= 55) {
+      // Late 2-goal leads with reduced pace: Exponential damping
+      const totSot10 = (d10.home.shotsOnTarget || 0) + (d10.away.shotsOnTarget || 0);
+      if (totSot10 <= 2) {
+        const leadDecay = Math.max(0.18, 0.30 * Math.exp(-0.048 * (minute - 55)));
+        const trailDecay = Math.max(0.24, 0.44 * Math.exp(-0.038 * (minute - 55)));
+        if (scoreDiff > 0) {
+          decayH = leadDecay;
+          decayA = trailDecay;
+        } else {
+          decayA = leadDecay;
+          decayH = trailDecay;
+        }
+      }
     } else if (absDiff === 1 && minute >= 70) {
       if (scoreDiff > 0 && (d5.home.totalShots || 0) === 0) decayH = 0.72;
       if (scoreDiff < 0 && (d5.away.totalShots || 0) === 0) decayA = 0.72;
@@ -1327,15 +1546,25 @@ class MatchMomentumEngine {
     const shotBurstHome = (d5.home.totalShots >= 2 && d5.home.shotsOnTarget >= 1) || (d10.home.totalShots >= 4 && d10.home.shotsOnTarget >= 2);
     const shotBurstAway = (d5.away.totalShots >= 2 && d5.away.shotsOnTarget >= 1) || (d10.away.totalShots >= 4 && d10.away.shotsOnTarget >= 2);
 
-    const cornerClusterHome = d5.home.corners >= 2 || d10.home.corners >= 3;
-    const cornerClusterAway = d5.away.corners >= 2 || d10.away.corners >= 3;
+    // High-Danger Index (HDI) for both teams
+    const hdiHome = this.computeHighDangerIndex(hStats);
+    const hdiAway = this.computeHighDangerIndex(aStats);
+
+    // Corner Cluster Surge Model (CCSM) evaluation (+22% to +35% goal expectancy boost on clusters)
+    const ccsmHome = this.evaluateCornerClusterSurge(d5.home, d10.home);
+    const ccsmAway = this.evaluateCornerClusterSurge(d5.away, d10.away);
+    const cornerClusterHome = ccsmHome.active;
+    const cornerClusterAway = ccsmAway.active;
+
+    // Late Game Volatility Index (LGV) evaluation (minutes 68-88 with 1-goal margin)
+    const lgv = this.evaluateLateGameVolatility(match, d5, d10, gpiHome, gpiAway, igpHome, igpAway);
 
     const pace = this.classifyMatchPace(d10.home, d10.away, hStats, aStats, minute, gpiHome, gpiAway, match.home?.score || 0, match.away?.score || 0);
     const { archetype, archetypeLabel, narrative } = this.detectArchetypeAndNarrative(
-      match, gpiHome, gpiAway, dpiHome, dpiAway, igpHome, igpAway, pace, d5, d10, periodInfo
+      match, gpiHome, gpiAway, dpiHome, dpiAway, igpHome, igpAway, pace, d5, d10, periodInfo, lgv, { home: ccsmHome, away: ccsmAway }
     );
     const evidenceFactors = this.buildEvidenceFactors(
-      match, gpiHome, gpiAway, dpiHome, dpiAway, igpHome, igpAway, pace, d5, d10, periodInfo, archetype
+      match, gpiHome, gpiAway, dpiHome, dpiAway, igpHome, igpAway, pace, d5, d10, periodInfo, archetype, lgv, { home: ccsmHome, away: ccsmAway }
     );
 
     return {
@@ -1349,6 +1578,11 @@ class MatchMomentumEngine {
       shotBurstAway,
       cornerClusterHome,
       cornerClusterAway,
+      ccsmHome,
+      ccsmAway,
+      lgv,
+      hdiHome,
+      hdiAway,
       hasHalf2Data: periodInfo.hasHalf2Data,
       half2Stats: periodInfo.half2 || null,
       imminentGoalAlert: (match.status === 'LIVE' && minute < 75 && (igpHome >= 66 || igpAway >= 66)),

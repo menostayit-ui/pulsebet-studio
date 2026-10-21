@@ -27,7 +27,7 @@
       </div>
       <div class="brand-titles">
         <h1>PulseBet <span>Studio</span></h1>
-        <p>Canlı Futbol &amp; Akıllı Sinyal Platformu</p>
+        <p data-i18n="app_tagline">Canlı Futbol &amp; Akıllı Sinyal Platformu</p>
       </div>
     </div>
 
@@ -35,17 +35,17 @@
     <nav class="main-view-switcher" id="mainViewSwitcher">
       <button class="view-tab active" data-view="center">
         <svg class="vt-svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20M2 12h20"/></svg>
-        <span>Canlı Maçlar</span>
+        <span data-i18n="nav_all_matches">Canlı Maçlar</span>
         <span class="vt-badge" id="navBadgeAll">0</span>
       </button>
       <button class="view-tab" data-view="favorites">
         <svg class="vt-svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-        <span>Favoriler</span>
+        <span data-i18n="nav_favorites">Favoriler</span>
         <span class="vt-badge star-badge" id="navBadgeFav">0</span>
       </button>
       <button class="view-tab" data-view="radar">
         <svg class="vt-svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-        <span>Sinyal Radarı</span>
+        <span data-i18n="nav_radar">Sinyal Radarı</span>
         <span class="vt-badge pulse-badge" id="navBadgeSignals">0</span>
       </button>
     </nav>
@@ -54,9 +54,9 @@
     <div class="topbar-actions">
       <!-- Live Sync Indicator -->
       <div class="source-pills" id="sourcePills">
-        <div class="source-pill online" id="src-live" title="Canlı Veri Senkronizasyonu">
+        <div class="source-pill online" id="src-live" title="Canlı Veri Senkronizasyonu" data-i18n-title="source_live_sync">
           <span class="dot"></span>
-          <span class="name">Canlı</span>
+          <span class="name" data-i18n="minute_live">Canlı</span>
         </div>
       </div>
 
@@ -68,7 +68,7 @@
       </button>
 
       <!-- Language Switcher Pill (TR / EN) -->
-      <button class="action-chip lang-toggle-pill" id="btnLangToggle" title="Dil Değiştir / Switch Language (TR / EN)">
+      <button class="action-chip lang-toggle-pill" id="btnLangToggle" title="Dil Değiştir / Switch Language (TR / EN)" data-i18n-title="lang_toggle_title">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
           <circle cx="12" cy="12" r="10"></circle>
           <line x1="2" y1="12" x2="22" y2="12"></line>
@@ -94,19 +94,19 @@
 
           <div class="qsp-section">
             <span class="qsp-section-title" data-i18n="sec_appearance_sound">Görsel &amp; Ses</span>
-            <button class="qsp-item-btn theme-btn" id="btnThemeToggle" title="Açık / Koyu Tema Değiştir">
+            <button class="qsp-item-btn theme-btn" id="btnThemeToggle" title="Açık / Koyu Tema Değiştir" data-i18n-title="theme_toggle_title">
               <span class="qsp-icon" id="themeIcon">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
               </span>
               <span class="qsp-text" id="themeLabel" data-i18n="theme_light">Açık Tema</span>
             </button>
-            <button class="qsp-item-btn active" id="btnSoundToggle" title="Sesli uyarıları aç/kapat">
+            <button class="qsp-item-btn active" id="btnSoundToggle" title="Sesli uyarıları aç/kapat" data-i18n-title="sound_toggle_title">
               <span class="qsp-icon" id="soundIcon">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
               </span>
               <span class="qsp-text" data-i18n="sound_notifications">Sesli Bildirimler</span>
             </button>
-            <button class="qsp-item-btn" id="btnPopoverLangToggle" title="Dil Değiştir / Switch Language">
+            <button class="qsp-item-btn" id="btnPopoverLangToggle" title="Dil Değiştir / Switch Language" data-i18n-title="lang_toggle_title">
               <span class="qsp-icon">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
               </span>
@@ -116,7 +116,7 @@
 
           <div class="qsp-section">
             <span class="qsp-section-title" data-i18n="sec_notif_filter">Bildirim Filtresi</span>
-            <button class="qsp-item-btn" id="btnStarredOnly" title="Bildirimleri sadece favori maçlar için filtrele">
+            <button class="qsp-item-btn" id="btnStarredOnly" title="Bildirimleri sadece favori maçlar için filtrele" data-i18n-title="starred_only_title">
               <span class="qsp-icon">★</span>
               <span class="qsp-text" data-i18n="starred_only">Yalnızca Favori Bildirimleri</span>
             </button>
@@ -124,36 +124,31 @@
 
           <div class="qsp-section">
             <span class="qsp-section-title" data-i18n="sec_layout">Panel Görünümleri</span>
-            <button class="qsp-item-btn layout-chip" id="btnToggleLeftSidebar" title="Sol Maç Listesini Gizle/Aç (Kısayol: [ )">
+            <button class="qsp-item-btn layout-chip" id="btnToggleLeftSidebar" title="Sol Maç Listesini Gizle/Aç (Kısayol: [ )" data-i18n-title="toggle_left_sidebar_title">
               <span class="qsp-icon layout-icon">◧</span>
               <span class="qsp-text layout-text" data-i18n="layout_left">Sol Maç Listesi</span>
             </button>
-            <button class="qsp-item-btn layout-chip" id="btnToggleRightSidebar" title="Sağ Bildirimleri Gizle/Aç (Kısayol: ] )">
+            <button class="qsp-item-btn layout-chip" id="btnToggleRightSidebar" title="Sağ Bildirimleri Gizle/Aç (Kısayol: ] )" data-i18n-title="toggle_right_sidebar_title">
               <span class="qsp-icon layout-icon">◨</span>
               <span class="qsp-text layout-text" data-i18n="layout_right">Sağ Bildirim Paneli</span>
             </button>
           </div>
         </div>
       </div>
-              <span class="qsp-icon layout-icon">◨</span>
-              <span class="qsp-text layout-text">Sağ Bildirim Paneli</span>
-            </button>
-          </div>
-        </div>
-      </div>
+    </div>
     </div>
   </header>
 
   <!-- ================= VIEW 1: CANLI MAÇ MERKEZİ (3-Column Arena) ================= -->
   <main class="workspace" id="centerViewContainer">
     <!-- Floating Edge Triggers to restore collapsed sidebars -->
-    <button class="floating-edge-trigger edge-left hidden" id="btnExpandLeft" title="Sol Maç Listesini Göster">
+    <button class="floating-edge-trigger edge-left hidden" id="btnExpandLeft" title="Sol Maç Listesini Göster" data-i18n-title="btn_matches">
       <span class="fet-icon">›</span>
-      <span class="fet-label">Maçlar</span>
+      <span class="fet-label" data-i18n="btn_matches">Maçlar</span>
     </button>
-    <button class="floating-edge-trigger edge-right hidden" id="btnExpandRight" title="Sağ Bildirim Panelini Göster">
+    <button class="floating-edge-trigger edge-right hidden" id="btnExpandRight" title="Sağ Bildirim Panelini Göster" data-i18n-title="btn_notifications">
       <span class="fet-icon">‹</span>
-      <span class="fet-label">Bildirimler</span>
+      <span class="fet-label" data-i18n="btn_notifications">Bildirimler</span>
     </button>
 
     <!-- LEFT COLUMN: FotMob / Apple Sports Compact Match Lounge (280px) -->
@@ -162,12 +157,12 @@
         <div class="sidebar-header-top">
           <!-- Status Filter Tabs (Tümü | Canlı | Yaklaşan | Sinyal) -->
           <div class="filter-tabs" id="matchFilterTabs">
-            <button class="filter-tab active" data-filter="ALL">Tümü <span id="countAll">0</span></button>
-            <button class="filter-tab live-tab" data-filter="LIVE">Canlı <span id="countLive">0</span></button>
-            <button class="filter-tab" data-filter="UPCOMING">Yaklaşan <span id="countUpcoming">0</span></button>
-            <button class="filter-tab signal-tab" data-filter="SIGNALS">Sinyal <span id="countSignals">0</span></button>
+            <button class="filter-tab active" data-filter="ALL"><span data-i18n="filter_all">Tümü</span> <span id="countAll">0</span></button>
+            <button class="filter-tab live-tab" data-filter="LIVE"><span data-i18n="filter_live">Canlı</span> <span id="countLive">0</span></button>
+            <button class="filter-tab" data-filter="UPCOMING"><span data-i18n="filter_scheduled">Yaklaşan</span> <span id="countUpcoming">0</span></button>
+            <button class="filter-tab signal-tab" data-filter="SIGNALS"><span data-i18n="filter_signals">Sinyal</span> <span id="countSignals">0</span></button>
           </div>
-          <button class="sidebar-collapse-btn" id="btnCollapseLeft" title="Sol Paneli Daralt">‹</button>
+          <button class="sidebar-collapse-btn" id="btnCollapseLeft" title="Sol Paneli Daralt" data-i18n-title="collapse_left">‹</button>
         </div>
 
         <!-- Team & League Instant Search -->
@@ -176,8 +171,8 @@
             <circle cx="11" cy="11" r="8"></circle>
             <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
           </svg>
-          <input type="text" id="searchInput" placeholder="Takım veya lig ara..." autocomplete="off" />
-          <button class="clear-search-btn hidden" id="btnClearSearch" title="Aramayı Temizle">×</button>
+          <input type="text" id="searchInput" placeholder="Takım veya lig ara..." autocomplete="off" data-i18n-placeholder="search_placeholder" />
+          <button class="clear-search-btn hidden" id="btnClearSearch" title="Aramayı Temizle" data-i18n-title="btn_clear">×</button>
         </div>
 
         <!-- Custom League Picker Popover + Quick League Pills -->
@@ -185,7 +180,7 @@
           <div class="custom-league-dropdown" id="customLeagueDropdown">
             <button type="button" class="league-picker-trigger" id="btnLeaguePickerTrigger" aria-expanded="false">
               <div class="lpt-left">
-                <span class="lpt-label" id="selectedLeagueLabel">Tüm Ligler</span>
+                <span class="lpt-label" id="selectedLeagueLabel" data-i18n="league_all">Tüm Ligler</span>
               </div>
               <div class="lpt-right">
                 <span class="lpt-count" id="selectedLeagueCount">0</span>
@@ -201,7 +196,7 @@
                   <circle cx="11" cy="11" r="8"></circle>
                   <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
                 </svg>
-                <input type="text" id="leagueSearchInput" placeholder="Lig veya ülke filtrele..." autocomplete="off" />
+                <input type="text" id="leagueSearchInput" placeholder="Lig veya ülke filtrele..." autocomplete="off" data-i18n-placeholder="search_league_placeholder" />
               </div>
               <div class="lpp-list" id="leaguePickerList">
                 <!-- Populated dynamically -->
@@ -217,8 +212,8 @@
 
       <div class="match-list" id="matchListContainer">
         <div class="empty-state-card">
-          <h4>Canlı ve Yaklaşan Maçlar Yükleniyor</h4>
-          <p>Gerçek zamanlı kaynaklardan maç verileri senkronize ediliyor...</p>
+          <h4 data-i18n="loading_matches">Canlı ve Yaklaşan Maçlar Yükleniyor</h4>
+          <p data-i18n="loading_matches_sub">Gerçek zamanlı kaynaklardan maç verileri senkronize ediliyor...</p>
         </div>
       </div>
     </aside>
@@ -231,15 +226,15 @@
           <div class="hero-league-badge-wrap">
             <div class="hero-league-pill">
               <span class="hl-dot"></span>
-              <span id="heroLeague">LİG SEÇİLMEDİ</span>
+              <span id="heroLeague" data-i18n="league_not_selected">LİG SEÇİLMEDİ</span>
             </div>
-            <span class="hero-stage-badge" id="heroMatchStage">RESMİ MAÇ</span>
+            <span class="hero-stage-badge" id="heroMatchStage" data-i18n="official_match">RESMİ MAÇ</span>
           </div>
           <div class="hero-badges">
-            <span class="signal-status-pill" id="heroSignalStatusPill">Gidişat İzleniyor</span>
-            <button class="hero-star-btn" id="heroStarBtn" title="Favorilere Ekle">
+            <span class="signal-status-pill" id="heroSignalStatusPill" data-i18n="tracking_flow">Gidişat İzleniyor</span>
+            <button class="hero-star-btn" id="heroStarBtn" title="Favorilere Ekle" data-i18n-title="add_to_fav">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-              <span>Favoriye Ekle</span>
+              <span data-i18n="add_to_fav">Favoriye Ekle</span>
             </button>
           </div>
         </div>
@@ -251,8 +246,8 @@
               <img id="heroHomeLogo" src="" alt="Ev Sahibi Logo" />
             </div>
             <div class="team-info">
-              <span class="team-side-tag">EV SAHİBİ</span>
-              <h2 id="heroHomeName">Ev Sahibi</h2>
+              <span class="team-side-tag" data-i18n="side_home">EV SAHİBİ</span>
+              <h2 id="heroHomeName" data-i18n="team_home">Ev Sahibi</h2>
               <div class="team-meta">
                 <span class="xg-badge" id="heroHomeXg">xG 0.00</span>
                 <span class="rc-tag hidden" id="heroHomeRc">0 Kırmızı</span>
@@ -271,14 +266,14 @@
               <span class="min-pulse-dot"></span>
               <span class="min-text">--'</span>
             </div>
-            <div class="tempo-caption" id="heroTempoBadge">Dengeli Tempo</div>
+            <div class="tempo-caption" id="heroTempoBadge" data-i18n="tempo_balanced">Dengeli Tempo</div>
           </div>
 
           <!-- Away Team -->
           <div class="hero-team away">
             <div class="team-info align-right">
-              <span class="team-side-tag">DEPLASMAN</span>
-              <h2 id="heroAwayName">Deplasman</h2>
+              <span class="team-side-tag" data-i18n="side_away">DEPLASMAN</span>
+              <h2 id="heroAwayName" data-i18n="team_away">Deplasman</h2>
               <div class="team-meta justify-end">
                 <span class="rc-tag hidden" id="heroAwayRc">0 Kırmızı</span>
                 <span class="xg-badge" id="heroAwayXg">xG 0.00</span>
@@ -295,23 +290,23 @@
       <nav class="studio-tabs studio-nav-bar" id="studioTabs">
         <button class="studio-tab-btn snav-tab active" data-studio-tab="overview" data-stab="overview">
           <svg class="st-svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/></svg>
-          <span class="st-label">Genel Bakış</span>
+          <span class="st-label" data-i18n="tab_overview">Genel Bakış</span>
         </button>
         <button class="studio-tab-btn snav-tab" data-studio-tab="stats" data-stab="stats">
           <svg class="st-svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-          <span class="st-label">İstatistikler</span>
+          <span class="st-label" data-i18n="tab_stats">İstatistikler</span>
         </button>
         <button class="studio-tab-btn snav-tab" data-studio-tab="signals" data-stab="signals">
           <svg class="st-svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-          <span class="st-label">Sinyaller &amp; Taktik</span>
+          <span class="st-label" data-i18n="tab_signals">Sinyaller &amp; Taktik</span>
         </button>
         <button class="studio-tab-btn snav-tab" data-studio-tab="markets" data-stab="markets">
           <svg class="st-svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></svg>
-          <span class="st-label">Marketler</span>
+          <span class="st-label" data-i18n="tab_markets">Marketler</span>
         </button>
         <button class="studio-tab-btn snav-tab" data-studio-tab="timeline" data-stab="timeline">
           <svg class="st-svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-          <span class="st-label">Akış &amp; Kadro</span>
+          <span class="st-label" data-i18n="tab_timeline">Akış &amp; Kadro</span>
         </button>
       </nav>
 
@@ -326,7 +321,7 @@
               <span class="flow-radar-icon">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
               </span>
-              <strong id="flowArchetypeLabel">Canlı Saha Baskısı ve Momentum Radarı</strong>
+              <strong id="flowArchetypeLabel" data-i18n="radar_title">Canlı Saha Baskısı ve Momentum Radarı</strong>
             </div>
             <div class="pressure-values">
               <span class="pm-val home" id="igpHomeLabel">Ev Baskı: %50</span>
@@ -339,7 +334,7 @@
             <div class="pm-center-marker"></div>
             <div class="pm-fill-away" id="igpAwayBar" style="width: 50%"></div>
           </div>
-          <p class="flow-narrative" id="flowNarrativeText">
+          <p class="flow-narrative" id="flowNarrativeText" data-i18n="radar_default_narrative">
             Sol listeden bir maç seçtiğinizde taktiksel gidişat, şut kalitesi ve dakika/skor psikolojisi burada özetlenir.
           </p>
         </div>
@@ -350,10 +345,10 @@
           <div class="section-block overview-stats-card">
             <div class="section-head">
               <div>
-                <h3>Kritik Maç Metrikleri</h3>
-                <p class="section-sub">En belirleyici 4 canlı saha verisi</p>
+                <h3 data-i18n="overview_critical_metrics">Kritik Maç Metrikleri</h3>
+                <p class="section-sub" data-i18n="overview_critical_metrics_sub">En belirleyici 4 canlı saha verisi</p>
               </div>
-              <button class="bento-link-btn" data-goto-stab="stats" data-jump-tab="stats">Tüm 10 İstatistiği Aç →</button>
+              <button class="bento-link-btn" data-goto-stab="stats" data-jump-tab="stats" data-i18n="view_all_stats">Tüm 10 İstatistiği Aç →</button>
             </div>
             <div class="stats-matrix-rows compact" id="overviewStatsRows">
               <!-- Top 4 stats rendered here -->
@@ -371,10 +366,10 @@
             <div class="section-block overview-markets-card">
               <div class="section-head">
                 <div>
-                  <h3>Öne Çıkan Marketler</h3>
-                  <p class="section-sub">MS, 2.5/3.5 Alt/Üst ve Sıradaki Gol canlı oranları</p>
+                  <h3 data-i18n="featured_markets">Öne Çıkan Marketler</h3>
+                  <p class="section-sub" data-i18n="featured_markets_sub">MS, 2.5/3.5 Alt/Üst ve Sıradaki Gol canlı oranları</p>
                 </div>
-                <button class="bento-link-btn" data-goto-stab="markets" data-jump-tab="markets">Tüm 6 Marketi Aç →</button>
+                <button class="bento-link-btn" data-goto-stab="markets" data-jump-tab="markets" data-i18n="view_all_markets">Tüm 6 Marketi Aç →</button>
               </div>
               <div class="overview-markets-grid" id="overviewMarketsGrid">
                 <!-- 3 Top markets rendered here -->
@@ -389,12 +384,12 @@
         <div class="compact-stats-box matrix-card-centered">
           <div class="section-head">
             <div>
-              <h3>Resmi Maç İstatistik Matrisi</h3>
-              <p class="section-sub">Canlı performans verileri ve iki yönlü saha etkinliği</p>
+              <h3 data-i18n="stats_matrix_title">Resmi Maç İstatistik Matrisi</h3>
+              <p class="section-sub" data-i18n="stats_matrix_subtitle">Canlı performans verileri ve iki yönlü saha etkinliği</p>
             </div>
             <div class="matrix-legend">
-              <span class="legend-chip home"><span class="leg-dot home"></span> Ev Sahibi</span>
-              <span class="legend-chip away"><span class="leg-dot away"></span> Deplasman</span>
+              <span class="legend-chip home"><span class="leg-dot home"></span> <span data-i18n="team_home">Ev Sahibi</span></span>
+              <span class="legend-chip away"><span class="leg-dot away"></span> <span data-i18n="team_away">Deplasman</span></span>
             </div>
           </div>
 
@@ -402,13 +397,13 @@
           <div class="matrix-teams-strip">
             <div class="mts-team home">
               <img class="crest-sm" id="matrixHomeLogo" src="" alt="" />
-              <span class="mts-name" id="matrixHomeName">Ev Sahibi</span>
+              <span class="mts-name" id="matrixHomeName" data-i18n="team_home">Ev Sahibi</span>
             </div>
             <div class="mts-center">
-              <span class="mts-badge">RESMİ İSTATİSTİK MATRİSİ</span>
+              <span class="mts-badge" data-i18n="stats_matrix_title">RESMİ İSTATİSTİK MATRİSİ</span>
             </div>
             <div class="mts-team away">
-              <span class="mts-name" id="matrixAwayName">Deplasman</span>
+              <span class="mts-name" id="matrixAwayName" data-i18n="team_away">Deplasman</span>
               <img class="crest-sm" id="matrixAwayLogo" src="" alt="" />
             </div>
           </div>
@@ -430,8 +425,8 @@
           <div class="section-block evidence-block">
             <div class="section-head">
               <div>
-                <h3>Taktiksel Gidişat Kanıt Matrisi</h3>
-                <p class="section-sub">Kantitatif sinyal modelini tetikleyen 4 boyutlu saha faktörleri</p>
+                <h3 data-i18n="evidence_title">Taktiksel Gidişat Kanıt Matrisi</h3>
+                <p class="section-sub" data-i18n="evidence_subtitle">Kantitatif sinyal modelini tetikleyen 4 boyutlu saha faktörleri</p>
               </div>
             </div>
             <div class="flow-evidence-grid" id="flowEvidenceGrid">
@@ -446,8 +441,8 @@
         <div class="section-block markets-full-block">
           <div class="section-head">
             <div>
-              <h3>Market Beklentileri &amp; Değerli Oran Fırsatları</h3>
-              <p class="section-sub">Poisson &amp; Dixon-Coles olasılıkları, değer oranları ve kilitlenen market durumları</p>
+              <h3 data-i18n="markets_title">Market Beklentileri &amp; Değerli Oran Fırsatları</h3>
+              <p class="section-sub" data-i18n="markets_subtitle">Poisson &amp; Dixon-Coles olasılıkları, değer oranları ve kilitlenen market durumları</p>
             </div>
             <span class="lambda-pill hidden" id="lambdaBadge"></span>
           </div>
@@ -463,24 +458,24 @@
           <div class="section-block">
             <div class="section-head">
               <div>
-                <h3>Maç Olay Akışı</h3>
-                <p class="section-sub">Gol, asist, kart ve VAR kararları</p>
+                <h3 data-i18n="incidents_title">Maç Olay Akışı</h3>
+                <p class="section-sub" data-i18n="incidents_subtitle">Gol, asist, kart ve VAR kararları</p>
               </div>
             </div>
             <div class="timeline-list" id="matchTimelineList">
-              <div class="empty-box small">Henüz kayıtlı maç olayı yok.</div>
+              <div class="empty-box small" data-i18n="no_incidents_recorded">Henüz kayıtlı maç olayı yok.</div>
             </div>
           </div>
 
           <div class="section-block">
             <div class="section-head">
               <div>
-                <h3>Öne Çıkan Oyuncular</h3>
-                <p class="section-sub">Hücum, oyun kurulumu ve savunma etkinliği</p>
+                <h3 data-i18n="players_title">Öne Çıkan Oyuncular</h3>
+                <p class="section-sub" data-i18n="players_subtitle">Hücum, oyun kurulumu ve savunma etkinliği</p>
               </div>
             </div>
             <div class="players-summary-list" id="playersImpactBox">
-              <div class="empty-box small">Oyuncu verileri analiz ediliyor...</div>
+              <div class="empty-box small" data-i18n="analyzing_players">Oyuncu verileri analiz ediliyor...</div>
             </div>
           </div>
         </div>
@@ -508,20 +503,20 @@
         <div class="notif-segment-tabs" id="notifSegmentTabs">
           <button class="nseg-tab active" data-nview="signals">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
-            <span>Sinyaller</span>
+            <span data-i18n="tab_signals_header">Sinyaller</span>
             <span class="nseg-badge" id="nsegCountSignals">0</span>
           </button>
           <button class="nseg-tab" data-nview="events">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
-            <span>Maç Olayları</span>
+            <span data-i18n="tab_events_header">Maç Olayları</span>
             <span class="nseg-badge" id="nsegCountEvents">0</span>
           </button>
-          <button class="nseg-tab" data-nview="both" title="İkisini Birlikte Göster">
+          <button class="nseg-tab" data-nview="both" title="İkisini Birlikte Göster" data-i18n-title="tab_both_header">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="12" y1="3" x2="12" y2="21"></line></svg>
-            <span>İkili</span>
+            <span data-i18n="tab_both_header">İkili</span>
           </button>
         </div>
-        <button class="sidebar-collapse-btn" id="btnCollapseRight" title="Sağ Paneli Daralt">›</button>
+        <button class="sidebar-collapse-btn" id="btnCollapseRight" title="Sağ Paneli Daralt" data-i18n-title="collapse_right">›</button>
       </div>
 
       <!-- PANEL 1: CANLI SİNYAL BİLDİRİMLERİ & TUTTU/TUTMADI KARNESİ -->
@@ -532,36 +527,36 @@
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
             </span>
             <div class="np-title-text-group">
-              <h3>Sinyal Takibi</h3>
-              <p class="np-subtitle">Tuttu / Tutmadı canlı takip</p>
+              <h3 data-i18n="signal_tracker_title">Sinyal Takibi</h3>
+              <p class="np-subtitle" data-i18n="signal_tracker_subtitle">Tuttu / Tutmadı canlı takip</p>
             </div>
           </div>
           <div class="np-actions">
             <span class="np-count" id="signalNotifCount">0</span>
-            <button class="np-toggle active" id="toggleSignalNotifs" title="Canlı Sinyal Bildirimlerini Aç/Kapat">Aktif</button>
-            <button class="np-clear" id="btnClearSignals" title="Sinyal Bildirimlerini Temizle">Temizle</button>
+            <button class="np-toggle active" id="toggleSignalNotifs" title="Canlı Sinyal Bildirimlerini Aç/Kapat" data-i18n="btn_active">Aktif</button>
+            <button class="np-clear" id="btnClearSignals" title="Sinyal Bildirimlerini Temizle" data-i18n="btn_clear">Temizle</button>
           </div>
         </div>
 
         <!-- Mini Signal Hit-Rate Scoreboard Strip -->
         <div class="signal-scoreboard-strip" id="miniSignalScoreboard">
-          <button class="ssb-chip active" data-sig-filter="ALL" title="Tüm Sinyaller">
-            <span>Tümü</span>
+          <button class="ssb-chip active" data-sig-filter="ALL" title="Tüm Sinyaller" data-i18n-title="score_all">
+            <span data-i18n="score_all">Tümü</span>
             <b id="ssbTotal">0</b>
           </button>
-          <button class="ssb-chip won" data-sig-filter="WON" title="Tutan Sinyaller">
-            <span>Tuttu</span>
+          <button class="ssb-chip won" data-sig-filter="WON" title="Tutan Sinyaller" data-i18n-title="score_won">
+            <span data-i18n="score_won">Tuttu</span>
             <b id="ssbWon">0</b>
           </button>
-          <button class="ssb-chip lost" data-sig-filter="LOST" title="Tutmayan Sinyaller">
-            <span>Tutmadı</span>
+          <button class="ssb-chip lost" data-sig-filter="LOST" title="Tutmayan Sinyaller" data-i18n-title="score_lost">
+            <span data-i18n="score_lost">Tutmadı</span>
             <b id="ssbLost">0</b>
           </button>
-          <button class="ssb-chip pending" data-sig-filter="PENDING" title="Devam Eden Aktif Sinyaller">
-            <span>Aktif</span>
+          <button class="ssb-chip pending" data-sig-filter="PENDING" title="Devam Eden Aktif Sinyaller" data-i18n-title="score_in_play">
+            <span data-i18n="score_in_play">Aktif</span>
             <b id="ssbPending">0</b>
           </button>
-          <div class="ssb-rate" title="Sonuçlanan Sinyallerde Başarı Oranı">
+          <div class="ssb-rate" title="Sonuçlanan Sinyallerde Başarı Oranı" data-i18n-title="score_hit_rate">
             <span id="ssbRate">%0</span>
           </div>
         </div>
@@ -579,24 +574,24 @@
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
             </span>
             <div class="np-title-text-group">
-              <h3>Maç Olayları</h3>
-              <p class="np-subtitle">Gol, kart ve şut akışı</p>
+              <h3 data-i18n="match_events_title">Maç Olayları</h3>
+              <p class="np-subtitle" data-i18n="match_events_subtitle">Gol, kart ve şut akışı</p>
             </div>
           </div>
           <div class="np-actions">
             <span class="np-count" id="matchNotifCount">0</span>
-            <button class="np-clear" id="btnClearEvents" title="Maç Bildirimlerini Temizle">Temizle</button>
+            <button class="np-clear" id="btnClearEvents" title="Maç Bildirimlerini Temizle" data-i18n="btn_clear">Temizle</button>
           </div>
         </div>
 
         <!-- Customizable Match Event Type Toggles -->
         <div class="event-filter-pills" id="eventCategoryToggles">
-          <button class="ef-pill active" data-cat="goal">Gol</button>
-          <button class="ef-pill active" data-cat="disallowed_goal">İptal Gol</button>
-          <button class="ef-pill active" data-cat="assist">Asist</button>
-          <button class="ef-pill active" data-cat="shot">Şut</button>
-          <button class="ef-pill active" data-cat="foul">Faul</button>
-          <button class="ef-pill active" data-cat="card">Kart</button>
+          <button class="ef-pill active" data-cat="goal" data-i18n="pill_goal">Gol</button>
+          <button class="ef-pill active" data-cat="disallowed_goal" data-i18n="pill_disallowed">İptal Gol</button>
+          <button class="ef-pill active" data-cat="assist" data-i18n="pill_assist">Asist</button>
+          <button class="ef-pill active" data-cat="shot" data-i18n="pill_shot">Şut</button>
+          <button class="ef-pill active" data-cat="foul" data-i18n="pill_foul">Faul</button>
+          <button class="ef-pill active" data-cat="card" data-i18n="pill_card">Kart</button>
         </div>
 
         <div class="notif-stream" id="matchNotificationStream">
@@ -611,9 +606,9 @@
     <div class="full-view-inner">
       <div class="full-view-header">
         <div>
-          <span class="fv-eyebrow">KİŞİSEL İZLEME LİSTENİZ</span>
-          <h2>Favori Maçlarım</h2>
-          <p>Yıldızlanan maçların anlık skorları, şut istatistikleri ve sinyal durumları.</p>
+          <span class="fv-eyebrow" data-i18n="fav_eyebrow">KİŞİSEL İZLEME LİSTENİZ</span>
+          <h2 data-i18n="fav_title">Favori Maçlarım</h2>
+          <p data-i18n="fav_desc">Yıldızlanan maçların anlık skorları, şut istatistikleri ve sinyal durumları.</p>
         </div>
         <div class="fv-actions">
           <span class="fv-count-pill" id="favViewCountPill">0 Favori Maç</span>
@@ -630,9 +625,9 @@
     <div class="full-view-inner">
       <div class="full-view-header">
         <div>
-          <span class="fv-eyebrow">CANLI SİNYALLER</span>
-          <h2>Canlı Sinyal Radarı</h2>
-          <p>Canlı sinyal sonuç karnesi ve hareketlenen karşılaşmalar.</p>
+          <span class="fv-eyebrow" data-i18n="radar_view_eyebrow">CANLI SİNYALLER</span>
+          <h2 data-i18n="radar_view_title">Canlı Sinyal Radarı</h2>
+          <p data-i18n="radar_view_desc">Canlı sinyal sonuç karnesi ve hareketlenen karşılaşmalar.</p>
         </div>
         <div class="fv-actions">
           <span class="fv-count-pill emerald" id="radarViewCountPill">0 Aktif Sinyal</span>
@@ -642,23 +637,23 @@
       <!-- Full Signal Performance Scoreboard Banner -->
       <div class="radar-kpi-banner" id="radarKpiBanner">
         <div class="rkpi-card">
-          <span class="rkpi-label">TOPLAM SİNYAL</span>
+          <span class="rkpi-label" data-i18n="rkpi_total">TOPLAM SİNYAL</span>
           <strong class="rkpi-val" id="rkpiTotal">0</strong>
         </div>
         <div class="rkpi-card won">
-          <span class="rkpi-label">TUTAN SİNYALLER</span>
+          <span class="rkpi-label" data-i18n="rkpi_won">TUTAN SİNYALLER</span>
           <strong class="rkpi-val" id="rkpiWon">0</strong>
         </div>
         <div class="rkpi-card lost">
-          <span class="rkpi-label">TUTMAYAN SİNYALLER</span>
+          <span class="rkpi-label" data-i18n="rkpi_lost">TUTMAYAN SİNYALLER</span>
           <strong class="rkpi-val" id="rkpiLost">0</strong>
         </div>
         <div class="rkpi-card pending">
-          <span class="rkpi-label">AKTİF BEKLEYEN</span>
+          <span class="rkpi-label" data-i18n="rkpi_pending">AKTİF BEKLEYEN</span>
           <strong class="rkpi-val" id="rkpiPending">0</strong>
         </div>
         <div class="rkpi-card rate">
-          <span class="rkpi-label">BAŞARI ORANI</span>
+          <span class="rkpi-label" data-i18n="rkpi_rate">BAŞARI ORANI</span>
           <strong class="rkpi-val" id="rkpiRate">%0</strong>
         </div>
       </div>
@@ -666,12 +661,12 @@
       <!-- Tracked Signals Ledger Section -->
       <div class="radar-section-block">
         <div class="radar-section-head">
-          <h3>Canlı Sinyal Sonuç Karnesi (Tuttu / Tutmadı)</h3>
+          <h3 data-i18n="radar_section_ledger">Canlı Sinyal Sonuç Karnesi (Tuttu / Tutmadı)</h3>
           <div class="radar-ledger-tabs" id="radarLedgerFilterTabs">
-            <button class="rl-tab active" data-rfilter="ALL">Tümü</button>
-            <button class="rl-tab" data-rfilter="PENDING">Aktif</button>
-            <button class="rl-tab" data-rfilter="WON">Tutanlar</button>
-            <button class="rl-tab" data-rfilter="LOST">Tutmayanlar</button>
+            <button class="rl-tab active" data-rfilter="ALL" data-i18n="ledger_filter_all">Tümü</button>
+            <button class="rl-tab" data-rfilter="PENDING" data-i18n="ledger_filter_pending">Aktif</button>
+            <button class="rl-tab" data-rfilter="WON" data-i18n="ledger_filter_won">Tutanlar</button>
+            <button class="rl-tab" data-rfilter="LOST" data-i18n="ledger_filter_lost">Tutmayanlar</button>
           </div>
         </div>
         <div class="bento-grid" id="radarLedgerGrid">
@@ -682,7 +677,7 @@
       <!-- Currently Live Signal / Watchlist Matches -->
       <div class="radar-section-block">
         <div class="radar-section-head">
-          <h3>Şu An Hareketlenen Canlı Maçlar</h3>
+          <h3 data-i18n="radar_section_live">Şu An Hareketlenen Canlı Maçlar</h3>
         </div>
         <div class="bento-grid" id="radarBentoGrid">
           <!-- Populated dynamically -->

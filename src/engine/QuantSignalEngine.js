@@ -1,13 +1,24 @@
 /**
- * PulseBet Studio — Quantitative Live Betting, Dixon-Coles & 5-Pillar Sniper Signal Engine (V5)
- * Features:
+ * PulseBet Studio — Quantitative Live Betting, Dixon-Coles & 5-Pillar Sniper Signal Engine (V7)
+ * Institutional Quantitative Architecture:
+ *  - High-Danger Index (HDI): Dynamic shot danger metric combining:
+ *      * Inside-Box Shots: 2.50x
+ *      * Shots On Target: 1.80x
+ *      * Woodwork: 1.60x
+ *      * Big Chances: 2.80x
+ *  - Corner Cluster Surge Model (CCSM):
+ *      * Evaluates set-piece pressure on 2+ corners in 5m or 3+ corners in 10m
+ *      * Injects a +22% to +35% goal expectancy boost into remaining lambda
+ *  - Late Game Volatility Index (LGV):
+ *      * Active in minutes 68-88 with 1-goal margin (1-0, 0-1, 2-1, 1-2)
+ *      * Trailing team equalizer surge boost (+25% to +45% lambda boost when IGP >= 65 and DA surge)
+ *      * Leading team counter-attack boost (+20% to +38% lambda boost on trailing team reckless turnovers/fouls)
+ *  - Strict False-Positive Dampers:
+ *      * 1-1 Draw Guard: Over 3.5 strictly prohibited on 1-1 ties; only Over 2.5 permitted
+ *      * Blowout Cruise-Control: Exponential residual damping on margin >= 3 or late 2-goal leads with reduced pace
+ *      * Red Card dynamic penalty (rho = 0.55 penalty, +32% opposition boost)
  *  - Dixon-Coles Low-Score Correlation Adjustment (tau_DC, rho = -0.10) on (0,0), (1,0), (0,1), (1,1)
- *  - Position Quality Multiplier (Q_pos) & xG Debt Regression Boost (delta_lambda_xg_debt)
- *  - 2nd-Half (half2) Pace Separation & 5-Minute Blitz Burst Multiplier
- *  - 5-Pillar Conviction Scoring (Value Edge 28%, Momentum/IGP 22%, xG Debt & Shot Quality 20%, Archetype Alignment 18%, Odds Steam 12%)
- *  - Signal Tier Classification: ELİT SİNYAL (A+), GÜÇLÜ SİNYAL (A), DEĞER SİNYALİ (B+)
- *  - 12 Tactical Archetypes + 3 Quant Micro-Archetype Rescues (XG_DEBT_BREAKOUT, FIVE_MIN_BLITZ, BILATERAL_XG_EXCHANGE)
- *  - Strict 7-Point Safety Gatekeeper (Zero 75'+ late signals, Zero FT/HT signals, Zero MS on leading teams)
+ *  - 5-Pillar Conviction Scoring (Value Edge 28%, Momentum/IGP 22%, HDI & xG Debt 20%, Tactical Alignment 18%, Steam 12%)
  */
 
 class QuantSignalEngine {
@@ -33,7 +44,135 @@ class QuantSignalEngine {
   }
 
   /**
-   * V5 Enhanced Synthetic xG incorporating Inside-Box Shots (2.5x), Shots On Target (1.8x), Woodwork (1.6x), Big Chances (2.8x)
+   * High-Danger Index (HDI):
+   * Dynamic shot danger metric combining:
+   *  - Inside-Box Shots: 2.50x
+   *  - Shots On Target: 1.80x
+   *  - Woodwork: 1.60x
+   *  - Big Chances: 2.80x
+   */
+  computeHighDangerIndex(stats = {}) {
+    const sot = stats.shotsOnTarget || 0;
+    const cor = stats.corners || 0;
+    const box = stats.shotsInsideBox != null ? stats.shotsInsideBox : Math.round(0.62 * sot + 0.35 * cor);
+    const wood = stats.woodwork || 0;
+    const bc = stats.bigChances || 0;
+    const hdi = (2.50 * box) + (1.80 * sot) + (1.60 * wood) + (2.80 * bc);
+    return Number(hdi.toFixed(2));
+  }
+
+  /**
+   * Corner Cluster Surge Model (CCSM):
+   * When a team earns 2+ corners in a 5-minute rolling window or 3+ corners in 10 minutes,
+   * evaluates set-piece pressure and injects a +22% to +35% goal expectancy boost into remaining lambda.
+   */
+  evaluateCornerClusterSurge(d5 = {}, d10 = {}) {
+    const c5 = d5.corners || 0;
+    const c10 = d10.corners || 0;
+    const da5 = d5.dangerousAttacks || 0;
+    const blk5 = d5.blockedShots || 0;
+
+    const isCluster = c5 >= 2 || c10 >= 3;
+    if (!isCluster) {
+      return { active: false, boost: 1.0, c5, c10 };
+    }
+
+    const excess5 = Math.max(0, c5 - 2);
+    const excess10 = Math.max(0, c10 - 3);
+    const pressureIntensity = Math.min(
+      1.0,
+      (excess5 * 0.50) + (excess10 * 0.30) + (Math.min(1.0, da5 / 3.0) * 0.20) + (Math.min(1.0, blk5 / 2.0) * 0.20)
+    );
+    const boost = Number((1.22 + 0.13 * pressureIntensity).toFixed(3)); // Strictly +22% to +35% boost
+    return {
+      active: true,
+      boost,
+      c5,
+      c10,
+      pressureIntensity: Number(pressureIntensity.toFixed(2))
+    };
+  }
+
+  /**
+   * Late Game Volatility Index (LGV):
+   * In minutes 68-88 when a match has a 1-goal margin (1-0, 0-1, 2-1, 1-2):
+   *  - If the trailing team has IGP >= 65 and dangerous attack surge, boost trailing team equalizer lambda.
+   *  - If the trailing team commits reckless turnovers (high fouls/turnovers), boost counter-attack goal lambda for the leading team.
+   */
+  evaluateLateGameVolatility(match, windows, flow) {
+    const isLive = match.status === 'LIVE';
+    const t = match.minute || 0;
+    if (!isLive || t < 68 || t > 88) {
+      return { active: false, boostH: 1.0, boostA: 1.0, regime: 'NONE' };
+    }
+
+    const gH = match.home?.score || 0;
+    const gA = match.away?.score || 0;
+    const scoreDiff = gH - gA;
+    if (Math.abs(scoreDiff) !== 1) {
+      return { active: false, boostH: 1.0, boostA: 1.0, regime: 'NONE' };
+    }
+
+    const igpH = Number(flow?.igpHome ?? 50);
+    const igpA = Number(flow?.igpAway ?? 50);
+    const d5H = windows?.delta5?.home || {};
+    const d5A = windows?.delta5?.away || {};
+    const d10H = windows?.delta10?.home || {};
+    const d10A = windows?.delta10?.away || {};
+
+    let boostH = 1.0;
+    let boostA = 1.0;
+    let regime = 'NONE';
+
+    if (scoreDiff === 1) {
+      // Home leads by 1 goal (1-0, 2-1, etc.). Away is trailing.
+      // 1. Trailing team equalizer surge: IGP >= 65 + dangerous attack surge
+      const awayDaSurge = (d5A.dangerousAttacks >= 2) || (d10A.dangerousAttacks >= 4) || (d5A.totalShots >= 2) || (d5A.corners >= 1) || (d10A.shotsInsideBox >= 1);
+      const awayEqualizerSurge = igpA >= 65 && awayDaSurge;
+      if (awayEqualizerSurge) {
+        const excess = Math.min(1.0, (igpA - 65) / 20.0);
+        boostA = Number((1.25 + 0.20 * excess).toFixed(3)); // +25% to +45% equalizer boost
+      }
+
+      // 2. Trailing team reckless turnovers / desperate fouls
+      const awayReckless = (d5A.fouls >= 2) || (d10A.fouls >= 4) || (d10A.yellowCards >= 1);
+      if (awayReckless) {
+        const foulDensity = Math.min(1.0, ((d5A.fouls || 0) + (d10A.yellowCards || 0)) / 3.0);
+        boostH = Number((1.20 + 0.18 * foulDensity).toFixed(3)); // +20% to +38% counter-attack boost
+      }
+
+      if (awayEqualizerSurge && awayReckless) regime = 'BILATERAL_ENDGAME_CHAOS';
+      else if (awayEqualizerSurge) regime = 'AWAY_EQUALIZER_SIEGE';
+      else if (awayReckless) regime = 'HOME_COUNTER_OPPORTUNITY';
+    } else {
+      // Away leads by 1 goal (0-1, 1-2, etc.). Home is trailing.
+      // 1. Trailing team equalizer surge: IGP >= 65 + dangerous attack surge
+      const homeDaSurge = (d5H.dangerousAttacks >= 2) || (d10H.dangerousAttacks >= 4) || (d5H.totalShots >= 2) || (d5H.corners >= 1) || (d10H.shotsInsideBox >= 1);
+      const homeEqualizerSurge = igpH >= 65 && homeDaSurge;
+      if (homeEqualizerSurge) {
+        const excess = Math.min(1.0, (igpH - 65) / 20.0);
+        boostH = Number((1.25 + 0.20 * excess).toFixed(3)); // +25% to +45% equalizer boost
+      }
+
+      // 2. Trailing team reckless turnovers / desperate fouls
+      const homeReckless = (d5H.fouls >= 2) || (d10H.fouls >= 4) || (d10H.yellowCards >= 1);
+      if (homeReckless) {
+        const foulDensity = Math.min(1.0, ((d5H.fouls || 0) + (d10H.yellowCards || 0)) / 3.0);
+        boostA = Number((1.20 + 0.18 * foulDensity).toFixed(3)); // +20% to +38% counter-attack boost
+      }
+
+      if (homeEqualizerSurge && homeReckless) regime = 'BILATERAL_ENDGAME_CHAOS';
+      else if (homeEqualizerSurge) regime = 'HOME_EQUALIZER_SIEGE';
+      else if (homeReckless) regime = 'AWAY_COUNTER_OPPORTUNITY';
+    }
+
+    const active = boostH > 1.0 || boostA > 1.0;
+    return { active, boostH, boostA, regime };
+  }
+
+  /**
+   * Enhanced Synthetic xG incorporating High-Danger Index (HDI) shot components:
+   * Inside-Box Shots (2.5x), Shots On Target (1.8x), Woodwork (1.6x), Big Chances (2.8x)
    */
   syntheticXg(stats = {}, oppStats = {}) {
     if (stats.xg && stats.xg > 0.05) return Number(stats.xg.toFixed(2));
@@ -43,11 +182,11 @@ class QuantSignalEngine {
     const cor = stats.corners || 0;
     const bc = stats.bigChances || 0;
     const wood = stats.woodwork || 0;
-    const box = stats.shotsInsideBox || Math.round(0.62 * sot + 0.35 * cor);
+    const box = stats.shotsInsideBox != null ? stats.shotsInsideBox : Math.round(0.62 * sot + 0.35 * cor);
     const outBox = Math.max(0, (stats.totalShots || 0) - box);
     const oppSaves = oppStats.saves || 0;
 
-    // Shot Quality weights: Box 2.5x, SOT 1.8x, Woodwork 1.6x, Big Chance 2.8x
+    // Shot Quality calibrated with High-Danger Index (HDI): Box 2.5x, SOT 1.8x, Woodwork 1.6x, Big Chance 2.8x
     const est = (0.135 * sot) +
       (0.125 * box) +
       (0.330 * bc) +
@@ -62,7 +201,7 @@ class QuantSignalEngine {
 
   /**
    * Position Quality Multiplier Q_pos in [0.76, 1.45]
-   * Incorporates Shot Quality weights: Inside-Box (2.5x), Shots On Target (1.8x), Woodwork (1.6x), Big Chance (2.8x)
+   * Incorporates High-Danger Index (HDI): Inside-Box (2.5x), Shots On Target (1.8x), Woodwork (1.6x), Big Chance (2.8x)
    */
   computePositionQuality(stats = {}, oppStats = {}) {
     const tot = stats.totalShots || 0;
@@ -71,15 +210,17 @@ class QuantSignalEngine {
     const sot = stats.shotsOnTarget || 0;
     const blk = stats.blockedShots || 0;
     const cor = stats.corners || 0;
-    const box = stats.shotsInsideBox || Math.round(0.62 * sot + 0.35 * cor);
+    const box = stats.shotsInsideBox != null ? stats.shotsInsideBox : Math.round(0.62 * sot + 0.35 * cor);
     const bc = stats.bigChances || 0;
     const wood = stats.woodwork || 0;
     const oppSaves = oppStats.saves || 0;
 
+    const hdi = this.computeHighDangerIndex(stats);
     const rBox = this.clamp(0, 1, box / Math.max(1, tot));
     const rAcc = this.clamp(0, 1, (sot + 0.55 * blk) / Math.max(1, tot));
-    // High danger impact weighted by shot quality: big chances (2.8x) + woodwork (1.6x) + saves
-    const highDangerBonus = 0.080 * Math.min(4, (2.8 / 2.0) * bc + (1.6 / 2.0) * wood) + 0.025 * Math.min(5, oppSaves);
+    // High danger impact calibrated directly via High-Danger Index (HDI)
+    const dangerNorm = Math.min(1.0, hdi / Math.max(1, tot * 3.5));
+    const highDangerBonus = (0.10 * dangerNorm) + (0.025 * Math.min(5, oppSaves));
 
     const qPos = 0.78 + (0.38 * (2.5 / 2.0) * rBox) + (0.24 * (1.8 / 2.0) * rAcc) + highDangerBonus;
     return Number(this.clamp(0.76, 1.45, qPos).toFixed(3));
@@ -245,25 +386,25 @@ class QuantSignalEngine {
     const baseRateH = (1 - wLive) * priorH + wLive * effLiveH;
     const baseRateA = (1 - wLive) * priorA + wLive * effLiveA;
 
-    // Dynamic Last-10-Minute Pressure Delta (IGP) & Weighted Shot Quality (box 2.5x, sot 1.8x, wood 1.6x, bc 2.8x)
+    // Dynamic Last-10-Minute Pressure Delta (IGP) & High-Danger Index (HDI) (box 2.5x, sot 1.8x, wood 1.6x, bc 2.8x)
     const igpH = Number(flow?.igpHome ?? 50);
     const igpA = Number(flow?.igpAway ?? 50);
 
     const q10H = this.computePositionQuality(effD10H, effD10A);
     const q10A = this.computePositionQuality(effD10A, effD10H);
 
-    const d10BoxH = effD10H.shotsInsideBox || Math.round(0.62 * (effD10H.shotsOnTarget || 0) + 0.35 * (effD10H.corners || 0));
-    const d10BoxA = effD10A.shotsInsideBox || Math.round(0.62 * (effD10A.shotsOnTarget || 0) + 0.35 * (effD10A.corners || 0));
-    const d10SqH = (2.50 * d10BoxH) + (1.80 * (effD10H.shotsOnTarget || 0)) + (2.80 * (effD10H.bigChances || 0)) + (1.60 * (effD10H.woodwork || 0));
-    const d10SqA = (2.50 * d10BoxA) + (1.80 * (effD10A.shotsOnTarget || 0)) + (2.80 * (effD10A.bigChances || 0)) + (1.60 * (effD10A.woodwork || 0));
+    const hdiH = this.computeHighDangerIndex(hS);
+    const hdiA = this.computeHighDangerIndex(aS);
+    const hdi10H = this.computeHighDangerIndex(effD10H);
+    const hdi10A = this.computeHighDangerIndex(effD10A);
 
     const deltaIgpNormH = (igpH - 46) / 28;
     const deltaIgpNormA = (igpA - 46) / 28;
 
     // Remaining-time dynamic momentum scaling: as match approaches late stages, acute pressure deltas have higher local intensity
     const timeFactor = 1.0 + 0.25 * (t / 90);
-    const mH = isScheduled ? 1.0 : this.clamp(0.68, 1.65, 1.0 + (0.30 * Math.tanh(deltaIgpNormH) + 0.08 * Math.min(2, d10SqH / 4.0)) * timeFactor * q10H);
-    const mA = isScheduled ? 1.0 : this.clamp(0.68, 1.65, 1.0 + (0.30 * Math.tanh(deltaIgpNormA) + 0.08 * Math.min(2, d10SqA / 4.0)) * timeFactor * q10A);
+    const mH = isScheduled ? 1.0 : this.clamp(0.68, 1.65, 1.0 + (0.30 * Math.tanh(deltaIgpNormH) + 0.08 * Math.min(2, hdi10H / 4.0)) * timeFactor * q10H);
+    const mA = isScheduled ? 1.0 : this.clamp(0.68, 1.65, 1.0 + (0.30 * Math.tanh(deltaIgpNormA) + 0.08 * Math.min(2, hdi10A / 4.0)) * timeFactor * q10A);
 
     // 5-Minute Blitz Burst Multiplier (Captures sudden high-tempo waves before 10m averages react)
     const burstRawH = (0.45 * (effD5H.shotsOnTarget || 0)) + (0.18 * (effD5H.totalShots || 0)) + (0.20 * (effD5H.corners || 0));
@@ -271,24 +412,47 @@ class QuantSignalEngine {
     const burst5H = isScheduled ? 1.0 : Number(this.clamp(0.95, 1.28, 1.0 + Math.max(0, burstRawH - 0.35) * 0.20).toFixed(3));
     const burst5A = isScheduled ? 1.0 : Number(this.clamp(0.95, 1.28, 1.0 + Math.max(0, burstRawA - 0.35) * 0.20).toFixed(3));
 
-    // Game-State Decay (Score Protection / Rölanti Multiplier vs Trailing Favorite Surge)
+    // Corner Cluster Surge Model (CCSM): +22% to +35% goal expectancy boost on set-piece siege
+    const ccsmH = this.evaluateCornerClusterSurge(effD5H, effD10H);
+    const ccsmA = this.evaluateCornerClusterSurge(effD5A, effD10A);
+    const ccsmBoostH = isScheduled ? 1.0 : ccsmH.boost;
+    const ccsmBoostA = isScheduled ? 1.0 : ccsmA.boost;
+
+    // Late Game Volatility Index (LGV): Minutes 68-88 with 1-goal margin
+    const lgv = this.evaluateLateGameVolatility(match, windows, flow);
+    const lgvBoostH = isScheduled ? 1.0 : lgv.boostH;
+    const lgvBoostA = isScheduled ? 1.0 : lgv.boostA;
+
+    // Game-State Decay & Blowout Cruise-Control Damping:
+    // When margin >= 3 or late 2-goal leads with reduced pace, exponentially damp residual lambdas
     let gammaStateH = 1.0;
     let gammaStateA = 1.0;
     if (!isScheduled) {
-      if (absDiff >= 2 && t >= 55) {
-        const leadDecay = 0.35 * Math.exp(-0.038 * Math.max(0, t - 55));
-        if (scoreDiff > 0) {
-          gammaStateH = leadDecay;
-          gammaStateA = (mA >= 1.25 && (d10A.shotsOnTarget || 0) >= 2) ? 1.12 : 0.52;
-        } else {
-          gammaStateA = leadDecay;
-          gammaStateH = (mH >= 1.25 && (d10H.shotsOnTarget || 0) >= 2) ? 1.12 : 0.52;
+      if (absDiff >= 3) {
+        // Blowout Cruise-Control: Exponential damping on 3+ goal margins
+        const blowoutDamp = Math.max(0.10, 0.35 * Math.exp(-0.048 * Math.max(1, t - 30)));
+        gammaStateH = blowoutDamp;
+        gammaStateA = blowoutDamp;
+      } else if (absDiff === 2 && t >= 55) {
+        // Late 2-goal leads with reduced pace: Exponential damping
+        const totSot10 = (effD10H.shotsOnTarget || 0) + (effD10A.shotsOnTarget || 0);
+        const isPaceReduced = totSot10 <= 2 || flow?.pace?.code === 'CHOPPY_DEADLOCK' || flow?.pace?.code === 'BALANCED';
+        if (isPaceReduced) {
+          const leadDecay = 0.28 * Math.exp(-0.052 * Math.max(0, t - 55));
+          const trailDecay = 0.42 * Math.exp(-0.038 * Math.max(0, t - 55));
+          if (scoreDiff > 0) {
+            gammaStateH = leadDecay;
+            gammaStateA = (mA >= 1.25 && (effD10A.shotsOnTarget || 0) >= 2) ? 1.05 : trailDecay;
+          } else {
+            gammaStateA = leadDecay;
+            gammaStateH = (mH >= 1.25 && (effD10H.shotsOnTarget || 0) >= 2) ? 1.05 : trailDecay;
+          }
         }
       } else if (absDiff === 1 && t >= 15 && t < 64) {
         // Favorite trailing by 1 goal gets an urgency boost
         if (scoreDiff === -1 && priorH >= 1.50 && mH >= 1.08) gammaStateH = 1.16;
         if (scoreDiff === 1 && priorA >= 1.45 && mA >= 1.08) gammaStateA = 1.16;
-      } else if (absDiff === 1 && t >= 64) {
+      } else if (absDiff === 1 && t >= 64 && !lgv.active) {
         if (scoreDiff > 0) {
           gammaStateH = 0.70;
           gammaStateA = mA >= 1.16 ? 1.22 : 0.80;
@@ -302,16 +466,19 @@ class QuantSignalEngine {
       }
     }
 
+    // Red Card Dynamic Penalty: rho = 0.55 penalty, +32% opposition boost
     const hReds = Math.max(match.home.redCards || 0, hS.redCards || 0);
     const aReds = Math.max(match.away.redCards || 0, aS.redCards || 0);
     let rhoH = 1.0;
     let rhoA = 1.0;
     if (aReds > hReds) {
-      rhoH = 1.32;
-      rhoA = 0.55;
+      const redDiff = aReds - hReds;
+      rhoH = Number((1.0 + 0.32 * redDiff).toFixed(3)); // +32% opposition boost
+      rhoA = Number((Math.pow(0.55, redDiff)).toFixed(3)); // rho = 0.55 penalty
     } else if (hReds > aReds) {
-      rhoH = 0.55;
-      rhoA = 1.32;
+      const redDiff = hReds - aReds;
+      rhoH = Number((Math.pow(0.55, redDiff)).toFixed(3)); // rho = 0.55 penalty
+      rhoA = Number((1.0 + 0.32 * redDiff).toFixed(3)); // +32% opposition boost
     }
 
     const remRatioFull = isScheduled ? 1.0 : (isHt ? 0.511 : Math.max(0.015, (this.T_FULL - t) / this.T_FULL));
@@ -330,16 +497,16 @@ class QuantSignalEngine {
     let debtBoostA = 0;
 
     if (!isScheduled && t >= 16 && t < 74) {
-      if (xgDebtH >= 0.48 && (mH >= 1.02 || igpH >= 48 || (d10H.shotsOnTarget || 0) >= 1 || (d10H.corners || 0) >= 2)) {
+      if (xgDebtH >= 0.48 && (mH >= 1.02 || igpH >= 48 || (effD10H.shotsOnTarget || 0) >= 1 || (effD10H.corners || 0) >= 2)) {
         debtBoostH = this.clamp(0, 0.48, 0.36 * (xgDebtH - 0.38) * remRatioFull * qPosH * Math.max(0.85, igpH / 50));
       }
-      if (xgDebtA >= 0.48 && (mA >= 1.02 || igpA >= 48 || (d10A.shotsOnTarget || 0) >= 1 || (d10A.corners || 0) >= 2)) {
+      if (xgDebtA >= 0.48 && (mA >= 1.02 || igpA >= 48 || (effD10A.shotsOnTarget || 0) >= 1 || (effD10A.corners || 0) >= 2)) {
         debtBoostA = this.clamp(0, 0.48, 0.36 * (xgDebtA - 0.38) * remRatioFull * qPosA * Math.max(0.85, igpA / 50));
       }
     }
 
-    const coreLambdaRemH = baseRateH * remRatioFull * omega * mH * burst5H * gammaStateH * rhoH * pMultH * tMultH;
-    const coreLambdaRemA = baseRateA * remRatioFull * omega * mA * burst5A * gammaStateA * rhoA * pMultA * tMultA;
+    const coreLambdaRemH = baseRateH * remRatioFull * omega * mH * burst5H * ccsmBoostH * lgvBoostH * gammaStateH * rhoH * pMultH * tMultH;
+    const coreLambdaRemA = baseRateA * remRatioFull * omega * mA * burst5A * ccsmBoostA * lgvBoostA * gammaStateA * rhoA * pMultA * tMultA;
 
     // Time-proportional realism cap: remaining goals scale with remaining time
     // (max ~2.4 goals/90 per team and ~3.4 goals/90 combined, even under heavy pressure)
@@ -380,6 +547,16 @@ class QuantSignalEngine {
       momentumA: Number(mA.toFixed(2)),
       qPosH,
       qPosA,
+      hdiH,
+      hdiA,
+      ccsmBoostH,
+      ccsmBoostA,
+      ccsmActiveH: ccsmH.active,
+      ccsmActiveA: ccsmA.active,
+      lgvBoostH,
+      lgvBoostA,
+      lgvActive: lgv.active,
+      lgvRegime: lgv.regime,
       xgDebtH,
       xgDebtA,
       debtBoostH: Number(debtBoostH.toFixed(3)),
@@ -580,8 +757,20 @@ class QuantSignalEngine {
       if (recentBigEvent) return false;
     }
 
-    // 3c. ALTIN KURAL (Senior Quant Desk Trader Golden Rule):
-    // Canlı bahiste bir "Üst' (Over) sinyalinin tetiklenmesi için gereken gol sayısı (needed = Math.ceil(lineVal - gTot))
+    // 3c. 1-1 DRAW GUARD & SENIOR QUANT DESK TRADER GOLDEN RULE:
+    // On 1-1 ties, Over 3.5 is strictly prohibited; only Over 2.5 is permitted!
+    if (gH === 1 && gA === 1) {
+      if (selection.includes('Üst')) {
+        let lineVal = null;
+        const matchLine = selection.match(/(\d+\.?\d*)\s*Üst/i) || selection.match(/(\d+\.?\d*)/);
+        if (matchLine) lineVal = parseFloat(matchLine[1]);
+        if (lineVal !== null && lineVal > 2.5) {
+          return false; // STRICTLY FORBIDDEN: Over 3.5+ prohibited on 1-1 ties
+        }
+      }
+    }
+
+    // Canlı bahiste bir "Üst" (Over) sinyalinin tetiklenmesi için gereken gol sayısı (needed = Math.ceil(lineVal - gTot))
     // KESİNLİKLE 1 OLMALIDIR (needed === 1)! 1-1 giden maça 3.5 Üst (needed = 2) gibi 2 gol gerektiren yüksek varyanslı
     // tuzak bahisler KESİNLİKLE ENGELLENMELİDİR (return false;)!
     // needed <= 0 ise çizgi zaten gelmiştir / kapanmıştır.
@@ -900,6 +1089,14 @@ class QuantSignalEngine {
     } else if (arch === 'TACTICAL_DEADLOCK' || arch === 'HALFTIME_DEADLOCK' || arch === 'TACTICAL_STALEMATE_DRAW' || arch === 'HALFTIME_DRAW_DEADLOCK') {
       allowedMarketKeys = ['OU', 'HT_OU', 'BTTS', 'MS', 'NEXT_GOAL'];
       preferredDirection = 'UNDER_LOCK';
+    } else if (arch === 'LATE_GAME_VOLATILITY' || arch === 'LATE_GAME_VOLATILITY_EQUALIZER') {
+      const trailHome = scoreDiff < 0;
+      allowedMarketKeys = ['NEXT_GOAL', 'OU'];
+      preferredDirection = trailHome ? 'HOME_ATTACK' : 'AWAY_ATTACK';
+    } else if (arch === 'LATE_GAME_VOLATILITY_COUNTER') {
+      const leadHome = scoreDiff > 0;
+      allowedMarketKeys = ['NEXT_GOAL', 'OU'];
+      preferredDirection = leadHome ? 'HOME_ATTACK' : 'AWAY_ATTACK';
     } else {
       if (Math.max(flow.igpHome, flow.igpAway) >= 50 || totShots >= 6 || match.status === 'HT') {
         return {
@@ -929,6 +1126,21 @@ class QuantSignalEngine {
         }
 
         const sel = opt.selection;
+
+        // 1-1 Draw Guard: Over 3.5 is strictly prohibited on 1-1 ties; only Over 2.5 is permitted
+        if (match.home.score === 1 && match.away.score === 1) {
+          if (sel.includes('Üst')) {
+            let lineVal = opt.line;
+            if (lineVal == null) {
+              const matchLine = sel.match(/(\d+\.?\d*)\s*Üst/i) || sel.match(/(\d+\.?\d*)/);
+              lineVal = matchLine ? parseFloat(matchLine[1]) : 2.5;
+            }
+            if (lineVal > 2.5) {
+              continue; // Strictly prohibited on 1-1 ties
+            }
+          }
+        }
+
         let matchesDir = false;
 
         if (preferredDirection === 'HOME_ATTACK') {
@@ -1042,7 +1254,11 @@ class QuantSignalEngine {
     const rawActiveLine = (match.status === 'LIVE' || match.status === 'HT')
       ? (gTot === 0 ? (minute >= 50 ? 0.5 : 1.5) : (gTot + 0.5))
       : 2.5;
-    const activeLine = Math.max(0.5, rawActiveLine);
+    let activeLine = Math.max(0.5, rawActiveLine);
+    // 1-1 Draw Guard: Over 3.5 is strictly prohibited on 1-1 ties; only Over 2.5 is permitted
+    if (gH === 1 && gA === 1) {
+      activeLine = 2.5;
+    }
     const htActiveLine = Math.min(1.5, gTot + 0.5);
 
     // V5 Bivariate Poisson with Dixon-Coles Low-Score Correlation (rho = -0.10)

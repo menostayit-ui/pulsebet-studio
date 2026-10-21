@@ -43,9 +43,13 @@
       empty_match_list: 'Arama veya filtre kriterine uygun maç bulunamadı.',
       loading_matches: 'Canlı ve Yaklaşan Maçlar Yükleniyor',
       loading_matches_sub: 'Flashscore, 365Scores ve ESPN canlı veri hatları taranıyor...',
+      league_all: 'Tüm Ligler',
+      search_league_placeholder: 'Lig veya ülke filtrele...',
 
       // Studio Arena: Center Scoreboard & Tabs
       official_match: 'RESMİ MAÇ',
+      league_not_selected: 'LİG SEÇİLMEDİ',
+      tracking_flow: 'Gidişat İzleniyor',
       tempo_balanced: 'Dengeli Tempo',
       tempo_high: 'Yüksek Tempo',
       tempo_low: 'Düşük Tempo',
@@ -56,6 +60,13 @@
       minute_ft: 'MAÇ SONU',
       action_star_add: '☆ Favoriye Ekle',
       action_star_remove: '★ Favoride',
+      add_to_fav: 'Favoriye Ekle',
+      in_fav: 'Favoride',
+      team_home: 'Ev Sahibi',
+      team_away: 'Deplasman',
+      side_home: 'EV SAHİBİ',
+      side_away: 'DEPLASMAN',
+      red_cards_tag: 'Kırmızı',
 
       // Center Tabs
       tab_overview: 'Genel Bakış',
@@ -69,6 +80,14 @@
       home_pressure: 'Ev Baskı',
       away_pressure: 'Dep Baskı',
       radar_default_narrative: 'Sol listeden bir maç seçtiğinizde taktiksel gidişat, şut kalitesi ve dakika/skor psikolojisi burada özetlenir.',
+
+      // Overview Bento
+      overview_critical_metrics: 'Kritik Maç Metrikleri',
+      overview_critical_metrics_sub: 'En belirleyici 4 canlı saha verisi',
+      view_all_stats: 'Tüm 10 İstatistiği Aç →',
+      featured_markets: 'Öne Çıkan Marketler',
+      featured_markets_sub: 'MS, 2.5/3.5 Alt/Üst ve Sıradaki Gol canlı oranları',
+      view_all_markets: 'Tüm 6 Marketi Aç →',
 
       // Evidence Matrix
       evidence_title: 'Taktiksel Gidişat Kanıt Matrisi',
@@ -86,6 +105,7 @@
 
       // Key Metrics & Official Stats Matrix
       stats_matrix_title: 'RESMİ İSTATİSTİK MATRİSİ',
+      stats_matrix_subtitle: 'Canlı performans verileri ve iki yönlü saha etkinliği',
       metric_xg: 'Beklenen Gol (xG)',
       metric_possession: 'Topla Oynama',
       metric_total_shots: 'Toplam Şut',
@@ -125,6 +145,8 @@
       role_defensive_balance: 'Savunma Dengesi',
       empty_incidents: 'Bu maçta henüz gol, kart veya VAR olayı kaydedilmedi.',
       empty_incidents_scheduled: 'Maç henüz başlamadı.',
+      no_incidents_recorded: 'Henüz kayıtlı maç olayı yok.',
+      analyzing_players: 'Oyuncu verileri analiz ediliyor...',
 
       // Right Column: Notifications & Signals
       tab_signals_header: 'Sinyaller',
@@ -165,6 +187,14 @@
       spotlight_scanning_sub_prematch: 'Karşılaşma başlama saati bekleniyor',
       spotlight_default_reason: 'Kantitatif analiz motoru saha baskısını, şut kalitesini ve Poisson beklentilerini anlık ölçümlüyor. Değer eşiği aşıldığında sinyal tetiklenecektir.',
       spotlight_prematch_reason: 'Karşılaşma henüz başlamadı. Başlama düdüğüyle birlikte canlı saha metrikleri, baskı ve oran kırılımları gerçek zamanlı hesaplanacak.',
+      trigger_minute_label: 'Tetikleme: Dk',
+      current_score_label: 'Skor:',
+      signal_active_tag: 'SİNYAL AKTİF',
+      flow_signal_tag: 'GİDİŞAT SİNYALİ',
+      valuable_selection: 'Değerli Seçim',
+      elite_signal: 'ELİT SİNYAL',
+      strong_signal: 'GÜÇLÜ SİNYAL',
+      value_signal: 'DEĞER SİNYALİ',
 
       // Dedicated Views: Favorites & Radar
       fav_eyebrow: 'KİŞİSEL İZLEME LİSTENİZ',
@@ -176,7 +206,47 @@
       radar_view_title: 'Canlı Sinyal Radarı',
       radar_view_desc: 'Canlı sinyal sonuç karnesi ve hareketlenen karşılaşmalar.',
       radar_section_ledger: 'Canlı Sinyal Sonuç Karnesi (Tuttu / Tutmadı)',
-      radar_section_live: 'Şu An Hareketlenen Canlı Maçlar'
+      radar_section_live: 'Şu An Hareketlenen Canlı Maçlar',
+      ledger_filter_all: 'Tümü',
+      ledger_filter_pending: 'Aktif',
+      ledger_filter_won: 'Tutanlar',
+      ledger_filter_lost: 'Tutmayanlar',
+      rkpi_total: 'TOPLAM SİNYAL',
+      rkpi_won: 'TUTAN SİNYALLER',
+      rkpi_lost: 'TUTMAYAN SİNYALLER',
+      rkpi_pending: 'AKTİF BEKLEYEN',
+      rkpi_rate: 'BAŞARI ORANI',
+
+      // Additional UI & Metric Keys
+      source_live_sync: 'Canlı Veri Senkronizasyonu',
+      theme_toggle_title: 'Açık / Koyu Tema Değiştir',
+      sound_toggle_title: 'Sesli uyarıları aç/kapat',
+      lang_toggle_title: 'Dil Değiştir / Switch Language',
+      starred_only_title: 'Bildirimleri sadece favori maçlar için filtrele',
+      toggle_left_sidebar_title: 'Sol Maç Listesini Gizle/Aç (Kısayol: [ )',
+      toggle_right_sidebar_title: 'Sağ Bildirimleri Gizle/Aç (Kısayol: ] )',
+      prematch_expectation: 'Maç Önü Beklentisi',
+      prematch_analysis: 'Yaklaşan Maç Önü Analizi',
+      minute_extra: 'UZATMA',
+      late_minutes: "Son Dakikalar (85'+)",
+      extra_time: 'Uzatma Dakikaları',
+      today: 'Bugün',
+      metric_dangerous_attacks: 'Tehlikeli Atak',
+      def_balanced: 'İki takım savunması dengeli',
+      def_under_pressure: 'savunması baskı altında',
+      risk_high: 'Yüksek Risk',
+      risk_medium: 'Orta Risk',
+      total_label: 'Toplam',
+      sot_short: 'İsb',
+      soff_short: 'İsz',
+      current_label: 'Güncel',
+      empty_radar_heading: 'Canlı Radar Taraması Devam Ediyor',
+      empty_radar_text: 'Yüksek güvenli bir değer kırılması tespit edildiğinde maçlar burada canlı olarak listelenir.',
+      sig_paused: 'Canlı sinyal bildirimleri kullanıcı tarafından duraklatıldı.',
+      dismiss_signal: 'Sinyali Gizle',
+      dismiss_event: 'Bildirimi Kapat',
+      league_other: 'Diğer Ligler',
+      count_matches: 'Maç'
     },
 
     en: {
@@ -215,9 +285,13 @@
       empty_match_list: 'No matches found matching your search or filter criteria.',
       loading_matches: 'Loading Live & Upcoming Fixtures',
       loading_matches_sub: 'Streaming telemetry from Flashscore, 365Scores, and ESPN...',
+      league_all: 'All Leagues',
+      search_league_placeholder: 'Filter league or country...',
 
       // Studio Arena: Center Scoreboard & Tabs
       official_match: 'OFFICIAL MATCH',
+      league_not_selected: 'NO LEAGUE SELECTED',
+      tracking_flow: 'Tracking Flow',
       tempo_balanced: 'Balanced Tempo',
       tempo_high: 'High Tempo',
       tempo_low: 'Low Tempo',
@@ -228,6 +302,13 @@
       minute_ft: 'FULL TIME',
       action_star_add: '☆ Add to Favorites',
       action_star_remove: '★ In Favorites',
+      add_to_fav: 'Add to Favorites',
+      in_fav: 'In Favorites',
+      team_home: 'Home',
+      team_away: 'Away',
+      side_home: 'HOME',
+      side_away: 'AWAY',
+      red_cards_tag: 'Red',
 
       // Center Tabs
       tab_overview: 'Overview',
@@ -241,6 +322,14 @@
       home_pressure: 'Home Pressure',
       away_pressure: 'Away Pressure',
       radar_default_narrative: 'Select a match from the left list to review tactical momentum, shot quality, and in-game game state psychology.',
+
+      // Overview Bento
+      overview_critical_metrics: 'Key Match Metrics',
+      overview_critical_metrics_sub: 'Top 4 decisive live pitch metrics',
+      view_all_stats: 'Open All 10 Stats →',
+      featured_markets: 'Featured Core Markets',
+      featured_markets_sub: '1X2, 2.5/3.5 O/U and Next Goal live odds',
+      view_all_markets: 'Open All 6 Markets →',
 
       // Evidence Matrix
       evidence_title: 'Tactical Evidence Matrix',
@@ -258,6 +347,7 @@
 
       // Key Metrics & Official Stats Matrix
       stats_matrix_title: 'OFFICIAL STATS MATRIX',
+      stats_matrix_subtitle: 'Live performance telemetry & dual-box efficiency',
       metric_xg: 'Expected Goals (xG)',
       metric_possession: 'Possession',
       metric_total_shots: 'Total Shots',
@@ -297,6 +387,8 @@
       role_defensive_balance: 'Defensive Equilibrium',
       empty_incidents: 'No goals, cards, or VAR incidents recorded for this match yet.',
       empty_incidents_scheduled: 'Match has not started yet.',
+      no_incidents_recorded: 'No recorded match incidents yet.',
+      analyzing_players: 'Analyzing player impact metrics...',
 
       // Right Column: Notifications & Signals
       tab_signals_header: 'Signals',
@@ -337,6 +429,14 @@
       spotlight_scanning_sub_prematch: 'Awaiting kickoff whistle',
       spotlight_default_reason: 'Quantitative model is evaluating pitch pressure, chance quality, and Poisson distributions. Signals trigger when edge thresholds are exceeded.',
       spotlight_prematch_reason: 'Match has not started yet. Real-time telemetry, pressure momentum, and line movements will activate upon kickoff.',
+      trigger_minute_label: 'Trigger: Min',
+      current_score_label: 'Score:',
+      signal_active_tag: 'SIGNAL ACTIVE',
+      flow_signal_tag: 'MOMENTUM SIGNAL',
+      valuable_selection: 'Value Selection',
+      elite_signal: 'ELITE SIGNAL',
+      strong_signal: 'STRONG SIGNAL',
+      value_signal: 'VALUE SIGNAL',
 
       // Dedicated Views: Favorites & Radar
       fav_eyebrow: 'YOUR PERSONAL WATCHLIST',
@@ -348,15 +448,93 @@
       radar_view_title: 'Live Signal Radar',
       radar_view_desc: 'Tracked signal scorecard and fixtures gaining tactical momentum.',
       radar_section_ledger: 'Signal Settlement Scorecard (Won / Lost / In-Play)',
-      radar_section_live: 'Live Fixtures with Momentum Breakouts'
+      radar_section_live: 'Live Fixtures with Momentum Breakouts',
+      ledger_filter_all: 'All',
+      ledger_filter_pending: 'In-Play',
+      ledger_filter_won: 'Won',
+      ledger_filter_lost: 'Lost',
+      rkpi_total: 'TOTAL SIGNALS',
+      rkpi_won: 'WON SIGNALS',
+      rkpi_lost: 'LOST SIGNALS',
+      rkpi_pending: 'ACTIVE PENDING',
+      rkpi_rate: 'HIT RATE',
+
+      // Additional UI & Metric Keys
+      source_live_sync: 'Live Data Synchronization',
+      theme_toggle_title: 'Toggle Light / Dark Theme',
+      sound_toggle_title: 'Toggle Audio Notifications',
+      lang_toggle_title: 'Switch Language / Dil Değiştir',
+      starred_only_title: 'Filter alerts for favorite matches only',
+      toggle_left_sidebar_title: 'Toggle Left Match List (Shortcut: [ )',
+      toggle_right_sidebar_title: 'Toggle Right Alerts Panel (Shortcut: ] )',
+      prematch_expectation: 'Pre-Match Expectation',
+      prematch_analysis: 'Upcoming Pre-Match Analysis',
+      minute_extra: 'EXTRA TIME',
+      late_minutes: "Late Game (85'+)",
+      extra_time: 'Stoppage Time',
+      today: 'Today',
+      metric_dangerous_attacks: 'Dangerous Attacks',
+      def_balanced: 'Both defenses well balanced',
+      def_under_pressure: 'defense under pressure',
+      risk_high: 'High Risk',
+      risk_medium: 'Moderate Risk',
+      total_label: 'Total',
+      sot_short: 'On',
+      soff_short: 'Off',
+      current_label: 'Current',
+      empty_radar_heading: 'Live Radar Scan Active',
+      empty_radar_text: 'Fixtures will appear here live once a high-conviction value breakout occurs.',
+      sig_paused: 'Live value signal alerts paused by user.',
+      dismiss_signal: 'Dismiss Signal',
+      dismiss_event: 'Dismiss Alert',
+      league_other: 'Other Leagues',
+      count_matches: 'Matches'
     }
   };
 
   class I18nManager {
     constructor() {
-      const savedLang = localStorage.getItem('pulsebet_lang');
-      this.currentLang = savedLang === 'en' || savedLang === 'tr' ? savedLang : 'tr';
+      let saved = null;
+      try {
+        saved = localStorage.getItem('pulsebet_lang');
+      } catch (_) {}
+      this.currentLang = saved === 'en' || saved === 'tr' ? saved : 'tr';
       this.listeners = [];
+      this.initEventsBound = false;
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => this.initDom());
+      } else {
+        this.initDom();
+      }
+    }
+
+    initDom() {
+      this.applyTranslations();
+      this.bindButtons();
+    }
+
+    bindButtons() {
+      if (this.initEventsBound) return;
+      const btnLang = document.getElementById('btnLangToggle');
+      if (btnLang && !btnLang.dataset.i18nBound) {
+        btnLang.dataset.i18nBound = 'true';
+        btnLang.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          this.toggle();
+        });
+      }
+      const btnPopover = document.getElementById('btnPopoverLangToggle');
+      if (btnPopover && !btnPopover.dataset.i18nBound) {
+        btnPopover.dataset.i18nBound = 'true';
+        btnPopover.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          this.toggle();
+        });
+      }
+      this.initEventsBound = true;
     }
 
     get lang() {
@@ -365,7 +543,6 @@
 
     setLang(newLang) {
       if (newLang !== 'tr' && newLang !== 'en') return;
-      if (this.currentLang === newLang) return;
       this.currentLang = newLang;
       try {
         localStorage.setItem('pulsebet_lang', newLang);
@@ -406,17 +583,34 @@
 
     applyTranslations() {
       document.documentElement.setAttribute('lang', this.currentLang);
+
+      // Elements with data-i18n
       const elements = document.querySelectorAll('[data-i18n]');
       elements.forEach((el) => {
         const key = el.getAttribute('data-i18n');
         if (key) {
           const translation = this.t(key);
           if (translation) {
-            el.textContent = translation;
+            if (el.children.length === 0) {
+              el.textContent = translation;
+            } else {
+              let replaced = false;
+              for (const node of el.childNodes) {
+                if (node.nodeType === Node.TEXT_NODE && node.nodeValue.trim().length > 0) {
+                  node.nodeValue = translation + ' ';
+                  replaced = true;
+                  break;
+                }
+              }
+              if (!replaced) {
+                el.textContent = translation;
+              }
+            }
           }
         }
       });
 
+      // Placeholders
       const placeholders = document.querySelectorAll('[data-i18n-placeholder]');
       placeholders.forEach((el) => {
         const key = el.getAttribute('data-i18n-placeholder');
@@ -428,6 +622,7 @@
         }
       });
 
+      // Titles & Tooltips
       const titles = document.querySelectorAll('[data-i18n-title]');
       titles.forEach((el) => {
         const key = el.getAttribute('data-i18n-title');
@@ -439,13 +634,18 @@
         }
       });
 
-      // Update lang switch buttons if present
+      // Update lang switch buttons
       const langPill = document.getElementById('btnLangToggle');
       if (langPill) {
-        const activeLabel = this.currentLang.toUpperCase();
         langPill.setAttribute('data-current-lang', this.currentLang);
         const textSpan = langPill.querySelector('.lang-label');
-        if (textSpan) textSpan.textContent = activeLabel;
+        if (textSpan) textSpan.textContent = this.currentLang.toUpperCase();
+        langPill.title = this.currentLang === 'tr' ? 'Switch to English' : 'Türkçe Dilini Seç';
+      }
+
+      const popoverLangLabel = document.getElementById('langPopoverLabel');
+      if (popoverLangLabel) {
+        popoverLangLabel.textContent = this.currentLang === 'tr' ? 'English (İngilizce)' : 'Türkçe (Turkish)';
       }
     }
   }

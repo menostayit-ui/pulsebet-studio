@@ -17,8 +17,8 @@ class FlashscoreScraper {
     this.feedBaseUrl = 'https://2.flashscore.ninja/2/x/feed';
     this.oddsGraphQlUrl = 'https://global.ds.lsapp.eu/odds/pq_graphql';
     this.uaIndex = 0;
-    this.timeoutMs = 6000;
-    this.maxRetries = 1;
+    this.timeoutMs = 4500;
+    this.maxRetries = 2;
     this.headers = {
       'x-fsign': 'SW9D1eZo',
       'Referer': 'https://www.flashscore.com.tr/',
@@ -58,7 +58,9 @@ class FlashscoreScraper {
       } catch (err) {
         lastError = err;
         if (attempt < maxRetries) {
-          await new Promise(resolve => setTimeout(resolve, 200));
+          const jitter = Math.floor(Math.random() * 180) + 70;
+          const delay = 150 * Math.pow(2, attempt) + jitter;
+          await new Promise(resolve => setTimeout(resolve, delay));
         }
       }
     }
@@ -346,8 +348,40 @@ class FlashscoreScraper {
         eventType = 'YELLOW_CARD';
       } else if (labelLower.includes('red') || labelLower.includes('kırmızı') || primary.typeCode === '2') {
         eventType = 'RED_CARD';
-      } else if (labelLower.includes('substitution') || primary.typeCode === '6') {
+      } else if (labelLower.includes('substitution') || primary.typeCode === '6' || primary.typeCode === '7') {
         eventType = 'SUBSTITUTION';
+      }
+
+      let playerIn = null;
+      let playerOut = null;
+      let playerInId = null;
+      let playerOutId = null;
+
+      if (eventType === 'SUBSTITUTION') {
+        const inEntity = entities.find(e => {
+          const lbl = `${e.label || ''} ${e.comment || ''}`.toLowerCase();
+          return lbl.includes(' in') || lbl.includes('(in)') || lbl.includes('giren') || lbl.startsWith('in');
+        });
+        const outEntity = entities.find(e => {
+          const lbl = `${e.label || ''} ${e.comment || ''}`.toLowerCase();
+          return lbl.includes(' out') || lbl.includes('(out)') || lbl.includes('çıkan') || lbl.includes('cikan') || lbl.startsWith('out');
+        });
+
+        if (inEntity && outEntity) {
+          playerIn = inEntity.playerName || '';
+          playerInId = inEntity.playerId || null;
+          playerOut = outEntity.playerName || '';
+          playerOutId = outEntity.playerId || null;
+        } else if (entities.length >= 2) {
+          playerIn = entities[0]?.playerName || '';
+          playerInId = entities[0]?.playerId || null;
+          playerOut = entities[1]?.playerName || '';
+          playerOutId = entities[1]?.playerId || null;
+        } else {
+          playerIn = primary.playerName || '';
+          playerInId = primary.playerId || null;
+          playerOut = '';
+        }
       }
 
       const assistPlayer = secondary && (
@@ -357,6 +391,9 @@ class FlashscoreScraper {
 
       const anyPlayer = entities.find(e => e.playerName && e.playerName.trim())?.playerName;
       const finalPlayerName = primary.playerName || anyPlayer || '';
+      const isSub = eventType === 'SUBSTITUTION';
+      const eventPlayerName = isSub ? (playerIn || finalPlayerName) : finalPlayerName;
+      const eventPlayerId = isSub ? (playerInId || primary.playerId) : (primary.playerId || null);
 
       incidents.push({
         id: `fs_inc_${id}`,
@@ -364,10 +401,16 @@ class FlashscoreScraper {
         minute,
         addedTime,
         team: teamSide,
-        playerName: finalPlayerName,
-        playerId: primary.playerId || null,
+        playerName: eventPlayerName,
+        playerId: eventPlayerId,
         assistPlayerName: assistPlayer,
-        reason: primary.comment || primary.label || (eventType === 'GOAL_DISALLOWED' ? 'Gol iptal edildi' : ''),
+        playerIn: isSub ? (playerIn || finalPlayerName) : null,
+        playerOut: isSub ? (playerOut || null) : null,
+        playerInId: isSub ? (playerInId || null) : null,
+        playerOutId: isSub ? (playerOutId || null) : null,
+        subIn: isSub ? (playerIn || finalPlayerName) : null,
+        subOut: isSub ? (playerOut || null) : null,
+        reason: primary.comment || primary.label || (eventType === 'GOAL_DISALLOWED' ? 'Gol iptal edildi' : (isSub ? 'Oyuncu Değişikliği' : '')),
         homeScore: homeScoreAfter,
         awayScore: awayScoreAfter
       });
@@ -446,6 +489,7 @@ class FlashscoreScraper {
         saves: 0,
         dangerousAttacks: 0,
         attacks: 0,
+        substitutions: 0,
         xg: 0,
         xgot: 0,
         xa: 0
@@ -470,6 +514,7 @@ class FlashscoreScraper {
         saves: 0,
         dangerousAttacks: 0,
         attacks: 0,
+        substitutions: 0,
         xg: 0,
         xgot: 0,
         xa: 0
@@ -550,12 +595,15 @@ class FlashscoreScraper {
       } else if (name.includes('saves') || kv.SD === '19') {
         stats.home.saves = hVal;
         stats.away.saves = aVal;
-      } else if (name.includes('dangerous attacks')) {
+      } else if (name.includes('dangerous attack') || name.includes('tehlikeli atak') || kv.SD === '36' || kv.SD === '43') {
         stats.home.dangerousAttacks = hVal;
         stats.away.dangerousAttacks = aVal;
-      } else if (name === 'attacks') {
+      } else if (name === 'attacks' || name.includes('ataklar') || name.includes('hücum') || kv.SD === '35' || kv.SD === '42') {
         stats.home.attacks = hVal;
         stats.away.attacks = aVal;
+      } else if (name.includes('substitution') || name.includes('oyuncu değişikliği') || name.includes('degisiklik') || kv.SD === '22') {
+        stats.home.substitutions = hVal;
+        stats.away.substitutions = aVal;
       }
     }
 

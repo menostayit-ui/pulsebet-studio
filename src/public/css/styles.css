@@ -1163,10 +1163,11 @@ body {
   padding: 8px 11px;
   cursor: pointer;
   box-shadow: var(--shadow-xs);
-  transition: all var(--transition-fast);
+  transition: border-color 0.15s ease, background 0.15s ease;
   position: relative;
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
+  contain: content;
+  content-visibility: auto;
+  contain-intrinsic-size: 0 68px;
 }
 
 .match-item:hover {
@@ -2925,16 +2926,17 @@ body {
   border-radius: 11px;
   padding: 10px 13px;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), var(--shadow-xs);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
   cursor: pointer;
-  transition: all var(--transition-fast);
+  transition: border-color 0.15s ease, background 0.15s ease;
   position: relative;
   display: flex;
   flex-direction: column;
   gap: 7px;
   min-width: 0;
   overflow: hidden;
+  contain: content;
+  content-visibility: auto;
+  contain-intrinsic-size: 0 68px;
 }
 
 .notif-card:hover {

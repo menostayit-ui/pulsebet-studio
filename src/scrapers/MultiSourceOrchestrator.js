@@ -138,8 +138,12 @@ class MultiSourceOrchestrator {
       freeKicks: 0,
       touchesInBox: 0,
       saves: 0,
+      attacks: 0,
       dangerousAttacks: 0,
-      xg: 0
+      substitutions: 0,
+      xg: 0,
+      xgot: 0,
+      xa: 0
     };
   }
 
@@ -445,7 +449,7 @@ class MultiSourceOrchestrator {
           'shotsInsideBox', 'shotsOutsideBox', 'bigChances', 'woodwork',
           'corners', 'fouls', 'yellowCards', 'redCards', 'offsides',
           'freeKicks', 'touchesInBox', 'saves', 'dangerousAttacks',
-          'attacks', 'xg', 'xgot', 'xa'
+          'attacks', 'substitutions', 'xg', 'xgot', 'xa'
         ];
         for (const k of copyKeys) {
           if (src[k] !== undefined && !isNaN(Number(src[k]))) {
@@ -466,7 +470,7 @@ class MultiSourceOrchestrator {
             'shotsInsideBox', 'shotsOutsideBox', 'bigChances', 'woodwork',
             'corners', 'fouls', 'yellowCards', 'redCards', 'offsides',
             'freeKicks', 'touchesInBox', 'saves', 'dangerousAttacks',
-            'attacks', 'xg', 'xgot', 'xa'
+            'attacks', 'substitutions', 'xg', 'xgot', 'xa'
           ];
           for (const k of supplementKeys) {
             const val = Number(src[k]);
@@ -478,7 +482,7 @@ class MultiSourceOrchestrator {
           // If Flashscore already provided stats, fill genuine missing metrics that Flashscore lacks (e.g. dangerousAttacks, fouls, xG)
           const fillIfMissing = [
             'xg', 'xgot', 'xa', 'shotsInsideBox', 'shotsOutsideBox', 'bigChances',
-            'woodwork', 'dangerousAttacks', 'attacks', 'touchesInBox', 'fouls',
+            'woodwork', 'dangerousAttacks', 'attacks', 'substitutions', 'touchesInBox', 'fouls',
             'saves', 'offsides', 'freeKicks'
           ];
           for (const k of fillIfMissing) {
@@ -505,7 +509,7 @@ class MultiSourceOrchestrator {
     // Mark that real stats arrived so cold-start snapshots never pollute sliding windows
     const hasRealStats = ['home', 'away'].some(side => {
       const s = targetMatch[side].stats || {};
-      return (s.totalShots || 0) + (s.corners || 0) + (s.fouls || 0) + (s.dangerousAttacks || 0) > 0;
+      return (s.totalShots || 0) + (s.corners || 0) + (s.fouls || 0) + (s.dangerousAttacks || 0) + (s.attacks || 0) + (s.substitutions || 0) + (s.shotsInsideBox || 0) > 0;
     });
     if (hasRealStats) targetMatch._statsHydrated = true;
 
@@ -552,6 +556,10 @@ class MultiSourceOrchestrator {
       } else {
         if (!dup.assistPlayerName && inc.assistPlayerName) dup.assistPlayerName = inc.assistPlayerName;
         if ((!dup.playerName || dup.playerName === 'Oyuncu') && inc.playerName) dup.playerName = inc.playerName;
+        if (!dup.playerIn && inc.playerIn) dup.playerIn = inc.playerIn;
+        if (!dup.playerOut && inc.playerOut) dup.playerOut = inc.playerOut;
+        if (!dup.subIn && inc.subIn) dup.subIn = inc.subIn;
+        if (!dup.subOut && inc.subOut) dup.subOut = inc.subOut;
       }
     }
 
@@ -562,11 +570,15 @@ class MultiSourceOrchestrator {
     const aYc = existing.filter(i => i.team === 'AWAY' && i.eventType === 'YELLOW_CARD').length;
     const hRc = existing.filter(i => i.team === 'HOME' && i.eventType === 'RED_CARD').length;
     const aRc = existing.filter(i => i.team === 'AWAY' && i.eventType === 'RED_CARD').length;
+    const hSubs = existing.filter(i => i.team === 'HOME' && i.eventType === 'SUBSTITUTION').length;
+    const aSubs = existing.filter(i => i.team === 'AWAY' && i.eventType === 'SUBSTITUTION').length;
 
     targetMatch.home.stats.yellowCards = Math.max(targetMatch.home.stats.yellowCards || 0, hYc);
     targetMatch.away.stats.yellowCards = Math.max(targetMatch.away.stats.yellowCards || 0, aYc);
     targetMatch.home.stats.redCards = Math.max(targetMatch.home.stats.redCards || 0, hRc);
     targetMatch.away.stats.redCards = Math.max(targetMatch.away.stats.redCards || 0, aRc);
+    targetMatch.home.stats.substitutions = Math.max(targetMatch.home.stats.substitutions || 0, hSubs);
+    targetMatch.away.stats.substitutions = Math.max(targetMatch.away.stats.substitutions || 0, aSubs);
   }
 
   mergeOdds(targetMatch, incomingOdds) {
@@ -1084,6 +1096,9 @@ class MultiSourceOrchestrator {
       promises.push(
         this.scores365.fetchMatchStats(s365Id, match.linkedIds.s365HomeId, match.linkedIds.s365AwayId)
           .then(st => this.mergeStats(match, st, '365scores'))
+          .catch(() => {}),
+        this.scores365.fetchMatchIncidents(s365Id, match.linkedIds.s365HomeId, match.linkedIds.s365AwayId)
+          .then(inc => this.mergeIncidents(match, inc))
           .catch(() => {})
       );
     }
@@ -1126,13 +1141,18 @@ class MultiSourceOrchestrator {
       const newEvents = [];
       const newSignals = [];
 
-      // Deep telemetry chunk: 8 (paralel istekler artırılsın)
-      for (let i = 0; i < targets.length; i += 8) {
-        const chunk = targets.slice(i, i + 8);
+      // Concurrency batch size: 6 with smooth jittered inter-chunk pacing to prevent upstream rate limiting
+      const chunkSize = 6;
+      for (let i = 0; i < targets.length; i += chunkSize) {
+        const chunk = targets.slice(i, i + chunkSize);
         const res = await Promise.all(chunk.map(m => this.enrichSingleMatch(m)));
         for (const r of res) {
           if (r?.detectedEvents?.length > 0) newEvents.push(...r.detectedEvents);
           if (r?.detectedSignals?.length > 0) newSignals.push(...r.detectedSignals);
+        }
+        if (i + chunkSize < targets.length) {
+          const chunkJitter = Math.floor(Math.random() * 50) + 40;
+          await new Promise(resolve => setTimeout(resolve, chunkJitter));
         }
       }
 
