@@ -143,19 +143,45 @@ $$\tau_{\lambda, \mu}(x, y) = \begin{cases}
 
 *(Live correlation coefficient calibrated at $\rho = -0.10$)*
 
-### 2. In-Game Pressure (IGP) Index
-Continuously computed for Home and Away sides on a rolling $[0, 100]$ scale:
+### 2. In-Game Pressure (IGP) Index & Pass Control Efficiency (PCE)
+Continuously computed for Home and Away sides on a rolling $[0, 100]$ scale, incorporating Pass Control Efficiency ($PCE$) to filter out sterile back-line circulation:
 
-$$IGP_{team} = w_{poss} \cdot \Phi_{poss} + w_{sot} \cdot SOT_{10m} + w_{box} \cdot S_{box, 10m} + w_{crn} \cdot Corners_{10m} + w_{da} \cdot DA_{10m}$$
+$$IGP_{team} = PCE \cdot \left( w_{poss} \cdot \Phi_{poss} + w_{sot} \cdot SOT_{10m} + w_{box} \cdot S_{box, 10m} + w_{crn} \cdot Corners_{10m} + w_{da} \cdot DA_{10m} \right)$$
 
-### 3. Game-State Exponential Decay
+Where $PCE$ decouples progression from sterile possession:
+- **Sterile Circulation ($PCE \in [0.72, 0.88]$):** High pass accuracy with low final-third conversion.
+- **Vertical Progressive Siege ($PCE \in [1.12, 1.38]$):** High dangerous attack conversion ($\ge 52\%$) and low passes per penetration ($\le 12$).
+
+### 3. Goalkeeper Resistance Index (GRI) & Unsustainable Variance
+Evaluates whether high opposition save counts represent an insurmountable barrier or imminent mean-reversion goal arrival:
+
+$$\text{GRI} = \frac{2.5 \cdot S_{box} + 1.8 \cdot SOT + 2.8 \cdot BC + 1.6 \cdot Woodwork}{\max(1, TotalShots)} \times \left(1 + 0.15 \cdot \text{Saves}_{opp}\right)$$
+
+When an opposing goalkeeper logs $\ge 4$ saves under high danger density, the engine classifies the regime as `UNSUSTAINABLE_VARIANCE`, triggering an immediate **$+18.0\%$ Next Goal edge bonus** and a **1.18x dynamic Poisson lambda multiplier**.
+
+### 4. Corner Cluster Surge Model (CCSM)
+When a team records $\ge 2$ corners in 5 minutes or $\ge 3$ corners in 10 minutes, set-piece pressure intensity $S_{ccsm} \in [0, 1]$ injects a continuous **$+22\%$ to $+35\%$ goal expectancy boost** into residual Poisson intensity ($\lambda_{rem}$).
+
+### 5. Late Game Volatility Index (LGV)
+Operational between minutes 68' and 88' in 1-goal margin matches ($|g_H - g_A| = 1$):
+- **Trailing Equalizer Overload ($IGP \ge 65$):** $+25\%$ to $+45\%$ residual equalizer lambda boost.
+- **Leading Counter-Attack Transition:** $+20\%$ to $+38\%$ counter-attack goal lambda boost when the trailing team commits transition turnovers.
+
+### 6. Synthetic Vig Stripping & Expected Value (+EV)
+Extracts true un-vigged market implied probabilities via proportional normalization:
+
+$$p_{fair} = \frac{1 / O_{market}}{\sum_{k} 1 / O_k}$$
+
+Mathematical Expected Value (+EV) is strictly enforced:
+
+$$EV_{\%} = (p_{model} \times O_{market} - 1) \times 100 \ge +3.0\%$$
+
+### 7. Game-State Exponential Decay
 When a team achieves a commanding lead ($\Delta_{score} \ge 2$ at $t \ge 58'$ or $\Delta_{score} \ge 3$), residual offensive rates undergo exponential decay:
 
 $$\gamma_{state} = 0.35 \cdot \exp\left(-0.038 \cdot \max(0, t - 55)\right)$$
 
-This accurately mirrors empirical football tactical realities where leading teams switch to low-tempo possession control and trailing teams experience tactical disorganization.
-
-### 4. 5-Pillar Conviction Index
+### 8. 5-Pillar Conviction Index
 Every prospective trading selection is rated against five distinct pillars:
 
 $$C_{score} = 0.28 \cdot \text{Edge}_{hybrid} + 0.22 \cdot \text{Momentum}_{rel} + 0.20 \cdot Q_{chance} + 0.18 \cdot S_{tactical} + 0.12 \cdot \Delta_{steam}$$

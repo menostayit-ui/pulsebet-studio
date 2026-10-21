@@ -76,6 +76,115 @@ class Scores365Scraper {
     }
   }
 
+  parseGameOdds(g) {
+    if (!g) return null;
+    const bets = g.bets || g.odds || g.gameBets || (Array.isArray(g.markets) ? g.markets : null);
+    if (!bets) return null;
+
+    const parsed = {
+      ms1: null, msX: null, ms2: null,
+      openMs1: null, openMsX: null, openMs2: null,
+      bttsYes: null, bttsNo: null,
+      ouLines: {},
+      htOuLines: {},
+      suspended: false
+    };
+
+    const betList = Array.isArray(bets) ? bets : Object.values(bets);
+
+    for (const b of betList) {
+      if (!b) continue;
+      const name = String(b.name || b.typeName || b.betTypeName || '').toLowerCase();
+      const typeId = b.type || b.betTypeId || b.id;
+      const rawLine = b.line !== undefined ? b.line : (b.handicap !== undefined ? b.handicap : null);
+      const lineVal = rawLine !== null && rawLine !== undefined ? String(rawLine).trim() : null;
+      const options = b.options || b.rates || b.outcomes || b.lines || b.odds || [];
+      const optList = Array.isArray(options) ? options : Object.values(options);
+
+      const parseRate = (opt) => {
+        if (!opt) return null;
+        const val = parseFloat(opt.rate ?? opt.odds ?? opt.value ?? opt.decimal ?? opt.price);
+        return (!isNaN(val) && val > 1.0) ? Number(val.toFixed(2)) : null;
+      };
+
+      const parseOpenRate = (opt) => {
+        if (!opt) return null;
+        const val = parseFloat(opt.openingRate ?? opt.openRate ?? opt.openOdds ?? opt.opening);
+        return (!isNaN(val) && val > 1.0) ? Number(val.toFixed(2)) : null;
+      };
+
+      // 1X2 / Full Time Result
+      if (typeId === 1 || name.includes('1x2') || name.includes('full time result') || name.includes('match result') || name === 'result' || name.includes('maç sonucu')) {
+        for (const opt of optList) {
+          const optName = String(opt.name || opt.outcomeName || opt.text || '').toLowerCase().trim();
+          const rate = parseRate(opt);
+          const openRate = parseOpenRate(opt) || rate;
+          if (!rate) continue;
+
+          const isHome = optName === '1' || optName === 'home' || (opt.competitorId && g.homeCompetitor?.id && String(opt.competitorId) === String(g.homeCompetitor.id));
+          const isAway = optName === '2' || optName === 'away' || (opt.competitorId && g.awayCompetitor?.id && String(opt.competitorId) === String(g.awayCompetitor.id));
+          const isDraw = optName === 'x' || optName === 'draw' || optName.includes('tie') || optName.includes('beraberlik');
+
+          if (isHome) {
+            parsed.ms1 = rate;
+            parsed.openMs1 = openRate;
+          } else if (isDraw) {
+            parsed.msX = rate;
+            parsed.openMsX = openRate;
+          } else if (isAway) {
+            parsed.ms2 = rate;
+            parsed.openMs2 = openRate;
+          }
+        }
+        if (optList.length >= 3 && !parsed.ms1 && !parsed.msX && !parsed.ms2) {
+          parsed.ms1 = parseRate(optList[0]);
+          parsed.msX = parseRate(optList[1]);
+          parsed.ms2 = parseRate(optList[2]);
+          parsed.openMs1 = parseOpenRate(optList[0]) || parsed.ms1;
+          parsed.openMsX = parseOpenRate(optList[1]) || parsed.msX;
+          parsed.openMs2 = parseOpenRate(optList[2]) || parsed.ms2;
+        }
+      }
+
+      // Over / Under 2.5 & other total lines
+      if (typeId === 2 || name.includes('over/under') || name.includes('total') || name.includes('alt/üst') || name.includes('goals over')) {
+        const line = lineVal || '2.5';
+        if (!parsed.ouLines[line]) parsed.ouLines[line] = {};
+        for (const opt of optList) {
+          const optName = String(opt.name || opt.outcomeName || opt.text || '').toLowerCase();
+          const rate = parseRate(opt);
+          const openRate = parseOpenRate(opt) || rate;
+          if (!rate) continue;
+
+          if (optName.includes('over') || optName.startsWith('o') || optName.includes('üst') || optName.includes('ust')) {
+            parsed.ouLines[line].over = rate;
+            parsed.ouLines[line].openOver = openRate;
+          } else if (optName.includes('under') || optName.startsWith('u') || optName.includes('alt')) {
+            parsed.ouLines[line].under = rate;
+            parsed.ouLines[line].openUnder = openRate;
+          }
+        }
+      }
+
+      // Both Teams to Score (BTTS)
+      if (typeId === 3 || name.includes('both teams to score') || name.includes('btts') || name.includes('karşılıklı gol')) {
+        for (const opt of optList) {
+          const optName = String(opt.name || opt.outcomeName || opt.text || '').toLowerCase();
+          const rate = parseRate(opt);
+          if (!rate) continue;
+          if (optName === 'yes' || optName === 'evet' || optName === 'var' || optName === 'y') {
+            parsed.bttsYes = rate;
+          } else if (optName === 'no' || optName === 'hayır' || optName === 'hayir' || optName === 'yok' || optName === 'n') {
+            parsed.bttsNo = rate;
+          }
+        }
+      }
+    }
+
+    const hasAnyOdds = parsed.ms1 || parsed.msX || parsed.ms2 || Object.keys(parsed.ouLines).length > 0;
+    return hasAnyOdds ? parsed : null;
+  }
+
   async fetchAllScores() {
     try {
       const url = `${this.baseUrl}/games/allscores/?appTypeId=5&langId=1&timezoneName=Europe/Istanbul&userCountryId=21&sports=1&_t=${Date.now()}`;
@@ -130,6 +239,7 @@ class Scores365Scraper {
         statusText,
         minute,
         hasStats: Boolean(g.hasStats),
+        odds: this.parseGameOdds(g),
         league: {
           id: String(g.competitionId || '365'),
           name: compName,
@@ -174,13 +284,17 @@ class Scores365Scraper {
           possession: 50, totalShots: 0, shotsOnTarget: 0, shotsOffTarget: 0,
           blockedShots: 0, shotsInsideBox: 0, shotsOutsideBox: 0, bigChances: 0, woodwork: 0,
           corners: 0, fouls: 0, yellowCards: 0, redCards: 0,
-          offsides: 0, freeKicks: 0, saves: 0, attacks: 0, dangerousAttacks: 0, substitutions: 0, xg: 0
+          offsides: 0, freeKicks: 0, saves: 0, goalkeeperSaves: 0,
+          passesCompleted: 0, passesTotal: 0, passAccuracy: 0,
+          attacks: 0, dangerousAttacks: 0, substitutions: 0, xg: 0
         },
         away: {
           possession: 50, totalShots: 0, shotsOnTarget: 0, shotsOffTarget: 0,
           blockedShots: 0, shotsInsideBox: 0, shotsOutsideBox: 0, bigChances: 0, woodwork: 0,
           corners: 0, fouls: 0, yellowCards: 0, redCards: 0,
-          offsides: 0, freeKicks: 0, saves: 0, attacks: 0, dangerousAttacks: 0, substitutions: 0, xg: 0
+          offsides: 0, freeKicks: 0, saves: 0, goalkeeperSaves: 0,
+          passesCompleted: 0, passesTotal: 0, passAccuracy: 0,
+          attacks: 0, dangerousAttacks: 0, substitutions: 0, xg: 0
         }
       };
 
@@ -205,14 +319,34 @@ class Scores365Scraper {
         else if (id === 1 || name.includes('yellow')) stats[side].yellowCards = val;
         else if (id === 2 || name.includes('red')) stats[side].redCards = val;
         else if (id === 9 || name.includes('offside')) stats[side].offsides = val;
-        else if (id === 13 || name.includes('free kick')) stats[side].freeKicks = val;
-        else if (id === 7 || name.includes('save')) stats[side].saves = val;
+        else if (id === 13 || name.includes('free kick') || name.includes('freekick')) stats[side].freeKicks = val;
+        else if (id === 7 || name.includes('save')) {
+          stats[side].saves = val;
+          stats[side].goalkeeperSaves = val;
+        }
         else if (id === 11 || name.includes('dangerous attack')) stats[side].dangerousAttacks = val;
         else if (id === 14 || id === 15 || name === 'attacks' || (name.includes('attack') && !name.includes('dangerous'))) stats[side].attacks = val;
         else if (id === 18 || name.includes('substitution') || name.includes('sub')) stats[side].substitutions = val;
         else if (name.includes('big chance')) stats[side].bigChances = val;
         else if (name.includes('woodwork')) stats[side].woodwork = val;
         else if (name.includes('xg') || name.includes('expected')) stats[side].xg = val;
+        else if (id === 20 || id === 21 || id === 22 || id === 25 || id === 26 || id === 27 || name.includes('pass') || name.includes('pas')) {
+          const valStr = String(item.value || '').trim();
+          if (valStr.includes('/')) {
+            const parts = valStr.split('/');
+            const comp = parseFloat(parts[0]) || 0;
+            const tot = parseFloat(parts[1]) || 0;
+            stats[side].passesCompleted = comp;
+            stats[side].passesTotal = tot;
+            if (tot > 0) stats[side].passAccuracy = Math.round((comp / tot) * 100);
+          } else if (valStr.includes('%') || name.includes('accuracy') || name.includes('yüzde')) {
+            stats[side].passAccuracy = val;
+          } else if (name.includes('accurate') || name.includes('completed') || name.includes('isabetli')) {
+            stats[side].passesCompleted = val;
+          } else if (name.includes('total') || name === 'passes') {
+            stats[side].passesTotal = val;
+          }
+        }
       }
 
       for (const side of ['home', 'away']) {
@@ -220,9 +354,25 @@ class Scores365Scraper {
         if (s.totalShots === 0 && (s.shotsOnTarget > 0 || s.shotsOffTarget > 0)) {
           s.totalShots = s.shotsOnTarget + s.shotsOffTarget + s.blockedShots;
         }
+        if (!s.passAccuracy && s.passesTotal > 0 && s.passesCompleted > 0) {
+          s.passAccuracy = Math.round((s.passesCompleted / s.passesTotal) * 100);
+        }
+        s.goalkeeperSaves = s.saves;
       }
 
       return stats;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  async fetchMatchOdds(gameId) {
+    try {
+      const url = `${this.baseUrl}/game/?appTypeId=5&langId=1&timezoneName=Europe/Istanbul&userCountryId=21&gameId=${gameId}&_t=${Date.now()}`;
+      const res = await this.fetchWithRetry(url);
+      const data = await res.json();
+      const g = data?.game || data;
+      return this.parseGameOdds(g);
     } catch (_) {
       return null;
     }

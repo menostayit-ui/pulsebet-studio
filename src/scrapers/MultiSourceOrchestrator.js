@@ -138,6 +138,10 @@ class MultiSourceOrchestrator {
       freeKicks: 0,
       touchesInBox: 0,
       saves: 0,
+      goalkeeperSaves: 0,
+      passesCompleted: 0,
+      passesTotal: 0,
+      passAccuracy: 0,
       attacks: 0,
       dangerousAttacks: 0,
       substitutions: 0,
@@ -448,8 +452,9 @@ class MultiSourceOrchestrator {
           'totalShots', 'shotsOnTarget', 'shotsOffTarget', 'blockedShots',
           'shotsInsideBox', 'shotsOutsideBox', 'bigChances', 'woodwork',
           'corners', 'fouls', 'yellowCards', 'redCards', 'offsides',
-          'freeKicks', 'touchesInBox', 'saves', 'dangerousAttacks',
-          'attacks', 'substitutions', 'xg', 'xgot', 'xa'
+          'freeKicks', 'touchesInBox', 'saves', 'goalkeeperSaves',
+          'passesCompleted', 'passesTotal', 'passAccuracy',
+          'dangerousAttacks', 'attacks', 'substitutions', 'xg', 'xgot', 'xa'
         ];
         for (const k of copyKeys) {
           if (src[k] !== undefined && !isNaN(Number(src[k]))) {
@@ -469,8 +474,9 @@ class MultiSourceOrchestrator {
             'totalShots', 'shotsOnTarget', 'shotsOffTarget', 'blockedShots',
             'shotsInsideBox', 'shotsOutsideBox', 'bigChances', 'woodwork',
             'corners', 'fouls', 'yellowCards', 'redCards', 'offsides',
-            'freeKicks', 'touchesInBox', 'saves', 'dangerousAttacks',
-            'attacks', 'substitutions', 'xg', 'xgot', 'xa'
+            'freeKicks', 'touchesInBox', 'saves', 'goalkeeperSaves',
+            'passesCompleted', 'passesTotal', 'passAccuracy',
+            'dangerousAttacks', 'attacks', 'substitutions', 'xg', 'xgot', 'xa'
           ];
           for (const k of supplementKeys) {
             const val = Number(src[k]);
@@ -479,11 +485,12 @@ class MultiSourceOrchestrator {
             }
           }
         } else {
-          // If Flashscore already provided stats, fill genuine missing metrics that Flashscore lacks (e.g. dangerousAttacks, fouls, xG)
+          // If Flashscore already provided stats, fill genuine missing metrics that Flashscore lacks (e.g. dangerousAttacks, fouls, xG, passes)
           const fillIfMissing = [
             'xg', 'xgot', 'xa', 'shotsInsideBox', 'shotsOutsideBox', 'bigChances',
             'woodwork', 'dangerousAttacks', 'attacks', 'substitutions', 'touchesInBox', 'fouls',
-            'saves', 'offsides', 'freeKicks'
+            'saves', 'goalkeeperSaves', 'offsides', 'freeKicks',
+            'passesCompleted', 'passesTotal', 'passAccuracy'
           ];
           for (const k of fillIfMissing) {
             const val = Number(src[k]);
@@ -492,6 +499,11 @@ class MultiSourceOrchestrator {
             }
           }
         }
+      }
+
+      dst.goalkeeperSaves = dst.saves = Math.max(dst.saves || 0, dst.goalkeeperSaves || 0);
+      if (!dst.passAccuracy && dst.passesTotal > 0 && dst.passesCompleted > 0) {
+        dst.passAccuracy = Math.round((dst.passesCompleted / dst.passesTotal) * 100);
       }
     }
 
@@ -509,7 +521,7 @@ class MultiSourceOrchestrator {
     // Mark that real stats arrived so cold-start snapshots never pollute sliding windows
     const hasRealStats = ['home', 'away'].some(side => {
       const s = targetMatch[side].stats || {};
-      return (s.totalShots || 0) + (s.corners || 0) + (s.fouls || 0) + (s.dangerousAttacks || 0) + (s.attacks || 0) + (s.substitutions || 0) + (s.shotsInsideBox || 0) > 0;
+      return (s.totalShots || 0) + (s.corners || 0) + (s.fouls || 0) + (s.dangerousAttacks || 0) + (s.attacks || 0) + (s.substitutions || 0) + (s.shotsInsideBox || 0) + (s.passesTotal || 0) + (s.saves || 0) > 0;
     });
     if (hasRealStats) targetMatch._statsHydrated = true;
 
@@ -581,20 +593,55 @@ class MultiSourceOrchestrator {
     targetMatch.away.stats.substitutions = Math.max(targetMatch.away.stats.substitutions || 0, aSubs);
   }
 
-  mergeOdds(targetMatch, incomingOdds) {
+  mergeOdds(targetMatch, incomingOdds, source = 'unknown') {
     if (!incomingOdds) return;
     const dst = targetMatch.odds;
+    const isFlashscore = source === 'flashscore';
+    if (isFlashscore && (incomingOdds.ms1 || Object.keys(incomingOdds.ouLines || {}).length > 0)) {
+      targetMatch._hasFlashscoreOdds = true;
+    }
+
     const fields = ['ms1', 'msX', 'ms2', 'openMs1', 'openMsX', 'openMs2', 'ht1', 'htX', 'ht2', 'bttsYes', 'bttsNo', 'htBttsYes', 'htBttsNo', 'nextGoalHome', 'nextGoalNo', 'nextGoalAway'];
     for (const f of fields) {
-      if (incomingOdds[f]) dst[f] = incomingOdds[f];
+      if (incomingOdds[f] !== undefined && incomingOdds[f] !== null) {
+        if (dst[f] === null || dst[f] === undefined) {
+          dst[f] = incomingOdds[f];
+        } else if (isFlashscore || !targetMatch._hasFlashscoreOdds) {
+          dst[f] = incomingOdds[f];
+        }
+      }
     }
-    if (incomingOdds.ouLines) {
-      dst.ouLines = { ...dst.ouLines, ...incomingOdds.ouLines };
+    if (incomingOdds.ouLines && typeof incomingOdds.ouLines === 'object') {
+      for (const [line, lineObj] of Object.entries(incomingOdds.ouLines)) {
+        if (!dst.ouLines[line]) {
+          dst.ouLines[line] = { ...lineObj };
+        } else {
+          for (const k of ['over', 'under', 'openOver', 'openUnder']) {
+            if ((dst.ouLines[line][k] === undefined || dst.ouLines[line][k] === null) && lineObj[k] !== undefined) {
+              dst.ouLines[line][k] = lineObj[k];
+            } else if (isFlashscore && lineObj[k] !== undefined) {
+              dst.ouLines[line][k] = lineObj[k];
+            }
+          }
+        }
+      }
     }
-    if (incomingOdds.htOuLines) {
-      dst.htOuLines = { ...dst.htOuLines, ...incomingOdds.htOuLines };
+    if (incomingOdds.htOuLines && typeof incomingOdds.htOuLines === 'object') {
+      for (const [line, lineObj] of Object.entries(incomingOdds.htOuLines)) {
+        if (!dst.htOuLines[line]) {
+          dst.htOuLines[line] = { ...lineObj };
+        } else {
+          for (const k of ['over', 'under', 'openOver', 'openUnder']) {
+            if ((dst.htOuLines[line][k] === undefined || dst.htOuLines[line][k] === null) && lineObj[k] !== undefined) {
+              dst.htOuLines[line][k] = lineObj[k];
+            } else if (isFlashscore && lineObj[k] !== undefined) {
+              dst.htOuLines[line][k] = lineObj[k];
+            }
+          }
+        }
+      }
     }
-    if (incomingOdds.suspended !== undefined) {
+    if (incomingOdds.suspended !== undefined && (!targetMatch._hasFlashscoreOdds || isFlashscore)) {
       dst.suspended = Boolean(incomingOdds.suspended);
     }
   }
@@ -982,6 +1029,9 @@ class MultiSourceOrchestrator {
       }
 
       this.mergeLogos(canonical, raw);
+      if (raw.odds) {
+        this.mergeOdds(canonical, raw.odds, raw.source);
+      }
 
       // Score conflict resolution: prioritize LIVE source (365scores > flashscore > espn)
       const SOURCE_SCORE_PRIORITY = { '365scores': 3, 'flashscore': 2, 'espn': 1 };
@@ -1086,19 +1136,29 @@ class MultiSourceOrchestrator {
       }
       promises.push(
         this.flashscore.fetchMatchOdds(fsId)
-          .then(od => this.mergeOdds(match, od))
+          .then(od => this.mergeOdds(match, od, 'flashscore'))
           .catch(() => {})
       );
     }
 
     const s365Id = match.linkedIds['365scores'];
-    if (s365Id && (match.status === 'LIVE' || match.status === 'HT')) {
+    if (s365Id) {
+      if (match.status === 'LIVE' || match.status === 'HT') {
+        promises.push(
+          this.scores365.fetchMatchStats(s365Id, match.linkedIds.s365HomeId, match.linkedIds.s365AwayId)
+            .then(st => this.mergeStats(match, st, '365scores'))
+            .catch(() => {}),
+          this.scores365.fetchMatchIncidents(s365Id, match.linkedIds.s365HomeId, match.linkedIds.s365AwayId)
+            .then(inc => this.mergeIncidents(match, inc))
+            .catch(() => {})
+        );
+      }
+      // Provide automatic odds fallback from 365Scores if Flashscore odds are missing
       promises.push(
-        this.scores365.fetchMatchStats(s365Id, match.linkedIds.s365HomeId, match.linkedIds.s365AwayId)
-          .then(st => this.mergeStats(match, st, '365scores'))
-          .catch(() => {}),
-        this.scores365.fetchMatchIncidents(s365Id, match.linkedIds.s365HomeId, match.linkedIds.s365AwayId)
-          .then(inc => this.mergeIncidents(match, inc))
+        this.scores365.fetchMatchOdds(s365Id)
+          .then(od => {
+            if (od) this.mergeOdds(match, od, '365scores');
+          })
           .catch(() => {})
       );
     }
@@ -1112,6 +1172,7 @@ class MultiSourceOrchestrator {
             if (summary.stats) this.mergeStats(match, summary.stats, 'espn');
             if (summary.incidents && summary.incidents.length > 0) this.mergeIncidents(match, summary.incidents);
             if (summary.shotmap && summary.shotmap.length > 0) match.shotmap = summary.shotmap;
+            if (summary.odds) this.mergeOdds(match, summary.odds, 'espn');
           })
           .catch(() => {})
       );

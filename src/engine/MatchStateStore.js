@@ -166,7 +166,7 @@ class MatchStateStore {
 
     const diffStats = (curr, prev, windowMins) => {
       const elapsedRealMins = prev ? Math.max(0.5, (now - prev.ts) / 60000) : 0;
-      const keys = ['totalShots', 'shotsOnTarget', 'shotsOffTarget', 'blockedShots', 'shotsInsideBox', 'bigChances', 'woodwork', 'corners', 'fouls', 'yellowCards', 'redCards', 'dangerousAttacks', 'xg'];
+      const keys = ['totalShots', 'shotsOnTarget', 'shotsOffTarget', 'blockedShots', 'shotsInsideBox', 'bigChances', 'woodwork', 'corners', 'fouls', 'yellowCards', 'redCards', 'dangerousAttacks', 'saves', 'offsides', 'touchesInBox', 'xg'];
       const out = {};
 
       for (const k of keys) {

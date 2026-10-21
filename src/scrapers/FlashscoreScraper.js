@@ -487,6 +487,10 @@ class FlashscoreScraper {
         freeKicks: 0,
         touchesInBox: 0,
         saves: 0,
+        goalkeeperSaves: 0,
+        passesCompleted: 0,
+        passesTotal: 0,
+        passAccuracy: 0,
         dangerousAttacks: 0,
         attacks: 0,
         substitutions: 0,
@@ -512,6 +516,10 @@ class FlashscoreScraper {
         freeKicks: 0,
         touchesInBox: 0,
         saves: 0,
+        goalkeeperSaves: 0,
+        passesCompleted: 0,
+        passesTotal: 0,
+        passAccuracy: 0,
         dangerousAttacks: 0,
         attacks: 0,
         substitutions: 0,
@@ -594,7 +602,9 @@ class FlashscoreScraper {
         stats.away.touchesInBox = aVal;
       } else if (name.includes('saves') || kv.SD === '19') {
         stats.home.saves = hVal;
+        stats.home.goalkeeperSaves = hVal;
         stats.away.saves = aVal;
+        stats.away.goalkeeperSaves = aVal;
       } else if (name.includes('dangerous attack') || name.includes('tehlikeli atak') || kv.SD === '36' || kv.SD === '43') {
         stats.home.dangerousAttacks = hVal;
         stats.away.dangerousAttacks = aVal;
@@ -604,6 +614,27 @@ class FlashscoreScraper {
       } else if (name.includes('substitution') || name.includes('oyuncu değişikliği') || name.includes('degisiklik') || kv.SD === '22') {
         stats.home.substitutions = hVal;
         stats.away.substitutions = aVal;
+      } else if (name.includes('passes') || name.includes('paslar') || name.includes('pas') || kv.SD === '25' || kv.SD === '436' || kv.SD === '437') {
+        const parsePassSide = (rawVal, side) => {
+          if (!rawVal) return;
+          const str = String(rawVal).trim();
+          if (str.includes('/')) {
+            const parts = str.split('/');
+            const comp = parseFloat(parts[0]) || 0;
+            const tot = parseFloat(parts[1]) || 0;
+            stats[side].passesCompleted = comp;
+            stats[side].passesTotal = tot;
+            if (tot > 0) stats[side].passAccuracy = Math.round((comp / tot) * 100);
+          } else if (str.endsWith('%') || name.includes('accuracy') || name.includes('yüzde') || kv.SD === '437') {
+            stats[side].passAccuracy = parseNum(str);
+          } else if (name.includes('completed') || name.includes('isabetli') || kv.SD === '436') {
+            stats[side].passesCompleted = parseNum(str);
+          } else {
+            stats[side].passesTotal = parseNum(str);
+          }
+        };
+        parsePassSide(kv.SH, 'home');
+        parsePassSide(kv.SI, 'away');
       }
     }
 
@@ -615,6 +646,10 @@ class FlashscoreScraper {
       } else if (s.totalShots > 0 && s.shotsOffTarget === 0 && s.totalShots > s.shotsOnTarget + s.blockedShots) {
         s.shotsOffTarget = s.totalShots - s.shotsOnTarget - s.blockedShots;
       }
+      if (!s.passAccuracy && s.passesTotal > 0 && s.passesCompleted > 0) {
+        s.passAccuracy = Math.round((s.passesCompleted / s.passesTotal) * 100);
+      }
+      s.goalkeeperSaves = s.saves;
     }
 
     return stats;
@@ -647,57 +682,83 @@ class FlashscoreScraper {
       const type = entry.bettingType;
       const scope = entry.bettingScope;
       const items = entry.odds || [];
+      if (!Array.isArray(items) || items.length === 0) continue;
 
-      if (type === 'HOME_DRAW_AWAY' && scope === 'FULL_TIME' && !parsed.ms1 && items.length >= 3) {
-        // In Flashscore HOME_DRAW_AWAY: item[0] = Home, item[1] = Away (has eventParticipantId), item[2] = Draw (eventParticipantId === null)
-        const drawItem = items.find(i => i.eventParticipantId === null) || items[2];
-        const teamItems = items.filter(i => i.eventParticipantId !== null);
-        const homeItem = teamItems[0] || items[0];
-        const awayItem = teamItems[1] || items[1];
+      const isFtScope = scope === 'FULL_TIME' || scope === 'ORDINARY_TIME' || scope === 'REGULAR_TIME';
+      const isHtScope = scope === 'FIRST_HALF' || scope === '1ST_HALF';
 
-        parsed.ms1 = parseFloat(homeItem?.value) || null;
-        parsed.msX = parseFloat(drawItem?.value) || null;
-        parsed.ms2 = parseFloat(awayItem?.value) || null;
-        parsed.openMs1 = parseFloat(homeItem?.opening) || parsed.ms1;
-        parsed.openMsX = parseFloat(drawItem?.opening) || parsed.msX;
-        parsed.openMs2 = parseFloat(awayItem?.opening) || parsed.ms2;
-        if (homeItem?.active === false && awayItem?.active === false) {
-          parsed.suspended = true;
+      if (type === 'HOME_DRAW_AWAY') {
+        const isDraw = (i) => i.eventParticipantId === null || i.selection === 'X' || i.selection === 'DRAW' || String(i.name || '').toLowerCase() === 'draw' || String(i.label || '').toLowerCase() === 'beraberlik' || String(i.label || '').toLowerCase() === 'x';
+        const isHome = (i) => i.selection === '1' || i.selection === 'HOME' || String(i.name || '').toLowerCase() === 'home' || String(i.label || '') === '1';
+        const isAway = (i) => i.selection === '2' || i.selection === 'AWAY' || String(i.name || '').toLowerCase() === 'away' || String(i.label || '') === '2';
+
+        const drawItem = items.find(isDraw) || (items.length >= 3 ? items[1] : null);
+        const nonDrawItems = items.filter(i => i !== drawItem);
+        const homeItem = items.find(isHome) || nonDrawItems[0] || items[0];
+        const awayItem = items.find(isAway) || nonDrawItems[1] || items[2] || items[1];
+
+        if (isFtScope && !parsed.ms1 && items.length >= 3) {
+          parsed.ms1 = parseFloat(homeItem?.value) || null;
+          parsed.msX = parseFloat(drawItem?.value) || null;
+          parsed.ms2 = parseFloat(awayItem?.value) || null;
+          parsed.openMs1 = parseFloat(homeItem?.opening) || parsed.ms1;
+          parsed.openMsX = parseFloat(drawItem?.opening) || parsed.msX;
+          parsed.openMs2 = parseFloat(awayItem?.opening) || parsed.ms2;
+          if (homeItem?.active === false && awayItem?.active === false) {
+            parsed.suspended = true;
+          }
+        } else if (isHtScope && !parsed.ht1 && items.length >= 3) {
+          parsed.ht1 = parseFloat(homeItem?.value) || null;
+          parsed.htX = parseFloat(drawItem?.value) || null;
+          parsed.ht2 = parseFloat(awayItem?.value) || null;
         }
-      } else if (type === 'HOME_DRAW_AWAY' && scope === 'FIRST_HALF' && !parsed.ht1 && items.length >= 3) {
-        const drawItem = items.find(i => i.eventParticipantId === null) || items[2];
-        const teamItems = items.filter(i => i.eventParticipantId !== null);
-        parsed.ht1 = parseFloat(teamItems[0]?.value) || null;
-        parsed.htX = parseFloat(drawItem?.value) || null;
-        parsed.ht2 = parseFloat(teamItems[1]?.value) || null;
-      } else if (type === 'BOTH_TEAMS_TO_SCORE' && scope === 'FULL_TIME' && !parsed.bttsYes && items.length >= 2) {
-        const yesItem = items.find(i => i.bothTeamsToScore === true) || items[0];
-        const noItem = items.find(i => i.bothTeamsToScore === false) || items[1];
-        parsed.bttsYes = parseFloat(yesItem?.value) || null;
-        parsed.bttsNo = parseFloat(noItem?.value) || null;
-      } else if (type === 'BOTH_TEAMS_TO_SCORE' && scope === 'FIRST_HALF' && !parsed.htBttsYes && items.length >= 2) {
-        const yesItem = items.find(i => i.bothTeamsToScore === true) || items[0];
-        const noItem = items.find(i => i.bothTeamsToScore === false) || items[1];
-        parsed.htBttsYes = parseFloat(yesItem?.value) || null;
-        parsed.htBttsNo = parseFloat(noItem?.value) || null;
-      } else if (type === 'OVER_UNDER' && (scope === 'FULL_TIME' || scope === 'FIRST_HALF')) {
-        const targetMap = scope === 'FULL_TIME' ? parsed.ouLines : parsed.htOuLines;
-        // Group items by handicap.value
+      } else if (type === 'BOTH_TEAMS_TO_SCORE') {
+        const isYes = (i) => i.bothTeamsToScore === true || i.selection === 'YES' || String(i.name || '').toLowerCase() === 'yes' || String(i.label || '').toLowerCase() === 'evet' || String(i.choice || '').toLowerCase() === 'yes';
+        const isNo = (i) => i.bothTeamsToScore === false || i.selection === 'NO' || String(i.name || '').toLowerCase() === 'no' || String(i.label || '').toLowerCase() === 'hayır' || String(i.label || '').toLowerCase() === 'hayir' || String(i.choice || '').toLowerCase() === 'no';
+
+        const yesItem = items.find(isYes) || items[0];
+        const noItem = items.find(isNo) || items[1];
+
+        if (isFtScope && !parsed.bttsYes && items.length >= 2) {
+          parsed.bttsYes = parseFloat(yesItem?.value) || null;
+          parsed.bttsNo = parseFloat(noItem?.value) || null;
+        } else if (isHtScope && !parsed.htBttsYes && items.length >= 2) {
+          parsed.htBttsYes = parseFloat(yesItem?.value) || null;
+          parsed.htBttsNo = parseFloat(noItem?.value) || null;
+        }
+      } else if (type === 'OVER_UNDER' && (isFtScope || isHtScope)) {
+        const targetMap = isFtScope ? parsed.ouLines : parsed.htOuLines;
         for (const item of items) {
-          const line = item.handicap?.value;
+          const rawLine = item.handicap?.value ?? item.handicapValue ?? item.handicap ?? item.line ?? item.total;
+          if (rawLine === undefined || rawLine === null) continue;
+          const line = String(parseFloat(rawLine) || rawLine).trim();
           if (!line) continue;
           if (!targetMap[line]) targetMap[line] = {};
-          const sel = (item.selection || '').toUpperCase();
+
+          const sel = String(item.selection || item.choice || item.name || item.label || '').toUpperCase();
           const val = parseFloat(item.value);
           const openVal = parseFloat(item.opening) || val;
           if (!val) continue;
-          if (sel === 'OVER' || (!sel && !targetMap[line].over)) {
+
+          const isOver = sel.includes('OVER') || sel === 'O' || sel.includes('ÜST') || sel === '1';
+          const isUnder = sel.includes('UNDER') || sel === 'U' || sel.includes('ALT') || sel === '2';
+
+          if (isOver || (!isUnder && !targetMap[line].over)) {
             targetMap[line].over = val;
             targetMap[line].openOver = openVal;
           } else {
             targetMap[line].under = val;
             targetMap[line].openUnder = openVal;
           }
+        }
+      } else if (type === 'NEXT_GOAL' && isFtScope) {
+        for (const item of items) {
+          const sel = String(item.selection || item.name || '').toUpperCase();
+          const val = parseFloat(item.value);
+          if (!val) continue;
+          if (sel === '1' || sel.includes('HOME')) parsed.nextGoalHome = val;
+          else if (sel === 'X' || sel.includes('NO') || sel.includes('NONE')) parsed.nextGoalNo = val;
+          else if (sel === '2' || sel.includes('AWAY')) parsed.nextGoalAway = val;
         }
       }
     }

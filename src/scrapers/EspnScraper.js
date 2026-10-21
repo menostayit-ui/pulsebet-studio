@@ -90,6 +90,71 @@ class EspnScraper {
     return Math.min(130, Math.max(1, total));
   }
 
+  parseMoneyLine(val) {
+    if (val === undefined || val === null || val === '') return null;
+    const num = parseFloat(String(val).replace('+', ''));
+    if (isNaN(num) || num === 0) return null;
+    if (num > 50) {
+      return Number(((num / 100) + 1).toFixed(2));
+    } else if (num < -50) {
+      return Number(((100 / Math.abs(num)) + 1).toFixed(2));
+    }
+    return num > 1.0 ? Number(num.toFixed(2)) : null;
+  }
+
+  parseEspnOdds(comp) {
+    if (!comp) return null;
+    const oddsList = comp.odds || (Array.isArray(comp) ? comp : []);
+    if (!Array.isArray(oddsList) || oddsList.length === 0) return null;
+
+    const consensus = oddsList.find(o => String(o.provider?.name || '').toLowerCase().includes('consensus')) || oddsList[0];
+    if (!consensus) return null;
+
+    const parsed = {
+      ms1: null, msX: null, ms2: null,
+      openMs1: null, openMsX: null, openMs2: null,
+      bttsYes: null, bttsNo: null,
+      ouLines: {},
+      htOuLines: {},
+      suspended: false
+    };
+
+    const hMl = consensus.homeTeamOdds?.moneyLine ?? consensus.homeTeamOdds?.current?.moneyLine ?? consensus.homeTeamOdds?.value;
+    const aMl = consensus.awayTeamOdds?.moneyLine ?? consensus.awayTeamOdds?.current?.moneyLine ?? consensus.awayTeamOdds?.value;
+    const dMl = consensus.drawOdds?.moneyLine ?? consensus.drawOdds?.current?.moneyLine ?? consensus.drawOdds?.value;
+
+    const openHMl = consensus.homeTeamOdds?.open?.moneyLine ?? consensus.open?.homeTeamOdds?.moneyLine ?? hMl;
+    const openAMl = consensus.awayTeamOdds?.open?.moneyLine ?? consensus.open?.awayTeamOdds?.moneyLine ?? aMl;
+    const openDMl = consensus.drawOdds?.open?.moneyLine ?? consensus.open?.drawOdds?.moneyLine ?? dMl;
+
+    parsed.ms1 = this.parseMoneyLine(hMl);
+    parsed.ms2 = this.parseMoneyLine(aMl);
+    parsed.msX = this.parseMoneyLine(dMl);
+
+    parsed.openMs1 = this.parseMoneyLine(openHMl) || parsed.ms1;
+    parsed.openMs2 = this.parseMoneyLine(openAMl) || parsed.ms2;
+    parsed.openMsX = this.parseMoneyLine(openDMl) || parsed.msX;
+
+    const ouLineVal = consensus.overUnder ?? consensus.open?.overUnder;
+    if (ouLineVal !== undefined && ouLineVal !== null) {
+      const lineStr = String(parseFloat(ouLineVal) || ouLineVal).trim();
+      const overOdd = this.parseMoneyLine(consensus.overOdds ?? consensus.current?.overOdds);
+      const underOdd = this.parseMoneyLine(consensus.underOdds ?? consensus.current?.underOdds);
+      const openOverOdd = this.parseMoneyLine(consensus.open?.overOdds) || overOdd;
+      const openUnderOdd = this.parseMoneyLine(consensus.open?.underOdds) || underOdd;
+
+      parsed.ouLines[lineStr] = {
+        over: overOdd,
+        under: underOdd,
+        openOver: openOverOdd,
+        openUnder: openUnderOdd
+      };
+    }
+
+    const hasAny = parsed.ms1 || parsed.msX || parsed.ms2 || Object.keys(parsed.ouLines).length > 0;
+    return hasAny ? parsed : null;
+  }
+
   /**
    * Fetch all current & today's matches from ESPN Soccer Scoreboard
    * Includes embedded team logos, scores, inline statistics, and goal/card details!
@@ -146,7 +211,9 @@ class EspnScraper {
           possession: 50, totalShots: 0, shotsOnTarget: 0, shotsOffTarget: 0,
           blockedShots: 0, shotsInsideBox: 0, shotsOutsideBox: 0, bigChances: 0, woodwork: 0,
           corners: 0, fouls: 0, yellowCards: 0, redCards: 0,
-          offsides: 0, freeKicks: 0, touchesInBox: 0, saves: 0, attacks: 0, dangerousAttacks: 0, substitutions: 0, xg: 0
+          offsides: 0, freeKicks: 0, touchesInBox: 0, saves: 0, goalkeeperSaves: 0,
+          passesCompleted: 0, passesTotal: 0, passAccuracy: 0,
+          attacks: 0, dangerousAttacks: 0, substitutions: 0, xg: 0
         };
         for (const item of (compObj.statistics || [])) {
           const name = (item.name || '').toLowerCase();
@@ -157,21 +224,47 @@ class EspnScraper {
           else if (name.includes('blocked')) s.blockedShots = val;
           else if (name.includes('inside') || name.includes('shotsinside')) s.shotsInsideBox = val;
           else if (name.includes('outside') || name.includes('shotsoutside')) s.shotsOutsideBox = val;
+          else if (name.includes('bigchance') || name.includes('big chance')) s.bigChances = val;
+          else if (name.includes('woodwork')) s.woodwork = val;
           else if (name.includes('foul')) s.fouls = val;
           else if (name.includes('corner')) s.corners = val;
           else if (name.includes('yellow')) s.yellowCards = val;
           else if (name.includes('red')) s.redCards = val;
           else if (name.includes('offside')) s.offsides = val;
           else if (name.includes('freekick') || name.includes('free kick')) s.freeKicks = val;
-          else if (name.includes('save')) s.saves = val;
+          else if (name.includes('save')) {
+            s.saves = val;
+            s.goalkeeperSaves = val;
+          }
           else if (name.includes('dangerous')) s.dangerousAttacks = val;
           else if (name === 'attacks' || (name.includes('attack') && !name.includes('dangerous'))) s.attacks = val;
           else if (name.includes('substitution') || name === 'subs') s.substitutions = val;
           else if (name.includes('xg') || name.includes('expected')) s.xg = val;
+          else if (name.includes('pass') || name.includes('pas')) {
+            const disp = String(item.displayValue || item.value || '').trim();
+            if (disp.includes('/')) {
+              const parts = disp.split('/');
+              const comp = parseFloat(parts[0]) || 0;
+              const tot = parseFloat(parts[1]) || 0;
+              s.passesCompleted = comp;
+              s.passesTotal = tot;
+              if (tot > 0) s.passAccuracy = Math.round((comp / tot) * 100);
+            } else if (disp.includes('%') || name.includes('accuracy') || name.includes('pct')) {
+              s.passAccuracy = val;
+            } else if (name.includes('completed') || name.includes('accpass') || name.includes('accurate')) {
+              s.passesCompleted = val;
+            } else if (name === 'totalpasses' || name === 'passes' || name.includes('total')) {
+              s.passesTotal = val;
+            }
+          }
         }
-        if (s.totalShots > s.shotsOnTarget) {
-          s.shotsOffTarget = s.totalShots - s.shotsOnTarget;
+        if (s.totalShots > s.shotsOnTarget + (s.blockedShots || 0)) {
+          s.shotsOffTarget = s.totalShots - s.shotsOnTarget - (s.blockedShots || 0);
         }
+        if (!s.passAccuracy && s.passesTotal > 0 && s.passesCompleted > 0) {
+          s.passAccuracy = Math.round((s.passesCompleted / s.passesTotal) * 100);
+        }
+        s.goalkeeperSaves = s.saves;
         return s;
       };
 
@@ -254,6 +347,7 @@ class EspnScraper {
         status,
         statusText,
         minute,
+        odds: this.parseEspnOdds(comp),
         inlineStats: { home: homeInlineStats, away: awayInlineStats },
         inlineIncidents,
         league: {
@@ -299,11 +393,18 @@ class EspnScraper {
       const data = await res.json();
       if (!data) return null;
 
+      const summaryOdds = this.parseEspnOdds(
+        data.header?.competitions?.[0] ||
+        data.boxscore?.competitions?.[0] ||
+        (Array.isArray(data.odds) ? { odds: data.odds } : (data.odds ? data.odds : null))
+      );
+
       const result = {
         stats: null,
         incidents: [],
         shotmap: [],
-        lineups: { home: [], away: [] }
+        lineups: { home: [], away: [] },
+        odds: summaryOdds
       };
 
     // 1. Boxscore statistics
@@ -314,32 +415,60 @@ class EspnScraper {
           possession: 50, totalShots: 0, shotsOnTarget: 0, shotsOffTarget: 0,
           blockedShots: 0, shotsInsideBox: 0, shotsOutsideBox: 0, bigChances: 0, woodwork: 0,
           corners: 0, fouls: 0, yellowCards: 0, redCards: 0,
-          offsides: 0, freeKicks: 0, touchesInBox: 0, saves: 0, attacks: 0, dangerousAttacks: 0, substitutions: 0, xg: 0
+          offsides: 0, freeKicks: 0, touchesInBox: 0, saves: 0, goalkeeperSaves: 0,
+          passesCompleted: 0, passesTotal: 0, passAccuracy: 0,
+          attacks: 0, dangerousAttacks: 0, substitutions: 0, xg: 0
         };
         for (const st of (tObj.statistics || [])) {
           const name = (st.name || '').toLowerCase();
-          const val = parseFloat(st.displayValue || '0') || 0;
+          const val = parseFloat(st.displayValue || st.value || '0') || 0;
           if (name.includes('possession')) s.possession = val;
           else if (name === 'totalshots' || name === 'shots') s.totalShots = val;
           else if (name === 'shotsontarget' || name === 'shotsongoal') s.shotsOnTarget = val;
           else if (name.includes('blocked')) s.blockedShots = val;
           else if (name.includes('inside') || name.includes('shotsinside')) s.shotsInsideBox = val;
           else if (name.includes('outside') || name.includes('shotsoutside')) s.shotsOutsideBox = val;
+          else if (name.includes('bigchance') || name.includes('big chance')) s.bigChances = val;
+          else if (name.includes('woodwork')) s.woodwork = val;
           else if (name.includes('foul')) s.fouls = val;
           else if (name.includes('corner')) s.corners = val;
           else if (name.includes('yellow')) s.yellowCards = val;
           else if (name.includes('red')) s.redCards = val;
           else if (name.includes('offside')) s.offsides = val;
           else if (name.includes('freekick') || name.includes('free kick')) s.freeKicks = val;
-          else if (name.includes('save')) s.saves = val;
+          else if (name.includes('save')) {
+            s.saves = val;
+            s.goalkeeperSaves = val;
+          }
           else if (name.includes('dangerous')) s.dangerousAttacks = val;
           else if (name === 'attacks' || (name.includes('attack') && !name.includes('dangerous'))) s.attacks = val;
           else if (name.includes('substitution') || name === 'subs') s.substitutions = val;
           else if (name.includes('xg') || name.includes('expected')) s.xg = val;
+          else if (name.includes('pass') || name.includes('pas')) {
+            const disp = String(st.displayValue || st.value || '').trim();
+            if (disp.includes('/')) {
+              const parts = disp.split('/');
+              const comp = parseFloat(parts[0]) || 0;
+              const tot = parseFloat(parts[1]) || 0;
+              s.passesCompleted = comp;
+              s.passesTotal = tot;
+              if (tot > 0) s.passAccuracy = Math.round((comp / tot) * 100);
+            } else if (disp.includes('%') || name.includes('accuracy') || name.includes('pct')) {
+              s.passAccuracy = val;
+            } else if (name.includes('completed') || name.includes('accpass') || name.includes('accurate')) {
+              s.passesCompleted = val;
+            } else if (name === 'totalpasses' || name === 'passes' || name.includes('total')) {
+              s.passesTotal = val;
+            }
+          }
         }
-        if (s.totalShots > s.shotsOnTarget + s.blockedShots) {
-          s.shotsOffTarget = s.totalShots - s.shotsOnTarget - s.blockedShots;
+        if (s.totalShots > s.shotsOnTarget + (s.blockedShots || 0)) {
+          s.shotsOffTarget = s.totalShots - s.shotsOnTarget - (s.blockedShots || 0);
         }
+        if (!s.passAccuracy && s.passesTotal > 0 && s.passesCompleted > 0) {
+          s.passAccuracy = Math.round((s.passesCompleted / s.passesTotal) * 100);
+        }
+        s.goalkeeperSaves = s.saves;
         return s;
       };
 

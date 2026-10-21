@@ -1,6 +1,14 @@
 /**
  * PulseBet Studio — Quantitative Live Betting, Dixon-Coles & 5-Pillar Sniper Signal Engine (V7)
  * Institutional Quantitative Architecture:
+ *  - Goalkeeper Resistance Index (GRI):
+ *      * Evaluates opposing goalkeeper performance (>= 4 saves or >= 85% save rate) under continuous high-danger shots
+ *      * Distinguishes unsustainable post-shot variance (+18% next goal edge, mean reversion goal arrival imminent) from impenetrable wall (conviction damping)
+ *  - Possession Quality & Pass Control Efficiency (PCE):
+ *      * Incorporates passAccuracy, passesCompleted vs dangerousAttacks
+ *      * Distinguishes sterile back-line circulation from vertical progressive siege
+ *  - High Defensive Line & Offside Trap Vulnerability (HLOV):
+ *      * Models space exploitation in behind high defensive lines for counter-attack transition goals on >= 3 offsides
  *  - High-Danger Index (HDI): Dynamic shot danger metric combining:
  *      * Inside-Box Shots: 2.50x
  *      * Shots On Target: 1.80x
@@ -14,10 +22,11 @@
  *      * Trailing team equalizer surge boost (+25% to +45% lambda boost when IGP >= 65 and DA surge)
  *      * Leading team counter-attack boost (+20% to +38% lambda boost on trailing team reckless turnovers/fouls)
  *  - Strict False-Positive Dampers:
- *      * 1-1 Draw Guard: Over 3.5 strictly prohibited on 1-1 ties; only Over 2.5 permitted
+ *      * 1-1 Draw Guard: Over 3.5 strictly prohibited on 1-1 ties; only Over 2.5 permitted (neededGoals === 1 strictly enforced)
  *      * Blowout Cruise-Control: Exponential residual damping on margin >= 3 or late 2-goal leads with reduced pace
  *      * Red Card dynamic penalty (rho = 0.55 penalty, +32% opposition boost)
  *  - Dixon-Coles Low-Score Correlation Adjustment (tau_DC, rho = -0.10) on (0,0), (1,0), (0,1), (1,1)
+ *  - Synthetic Vig Stripping & Institutional +EV Valuation: Strips bookmaker margin to derive true un-vigged market implied probabilities
  *  - 5-Pillar Conviction Scoring (Value Edge 28%, Momentum/IGP 22%, HDI & xG Debt 20%, Tactical Alignment 18%, Steam 12%)
  */
 
@@ -171,6 +180,193 @@ class QuantSignalEngine {
   }
 
   /**
+   * Goalkeeper Resistance Index (GRI):
+   * When opposing goalkeeper records >= 4 saves or save rate >= 85% despite continuous high-danger shots,
+   * measures whether this is unsustainable variance (mean reversion goal imminent, +18% next goal edge)
+   * or total impenetrable wall (adjusting conviction downwards).
+   */
+  computeGoalkeeperResistanceIndex(attStats = {}, oppStats = {}, attScore = 0, oppScore = 0, attD5 = {}, attD10 = {}) {
+    const oppSaves = oppStats.saves || 0;
+    const goals = attScore || 0;
+    const sotFaced = (attStats.shotsOnTarget || 0) > 0 ? attStats.shotsOnTarget : (oppSaves + goals);
+    const saveRate = (oppSaves + goals) > 0 ? (oppSaves / (oppSaves + goals)) : 0;
+
+    const isTriggerCandidate = (oppSaves >= 4 || (saveRate >= 0.85 && sotFaced >= 3));
+    if (!isTriggerCandidate) {
+      return {
+        active: false,
+        regime: 'NORMAL',
+        griScore: Math.round(saveRate * 50),
+        saveCount: oppSaves,
+        saveRate: Number((saveRate * 100).toFixed(1)),
+        isMeanReversionImminent: false,
+        lambdaBoost: 1.0,
+        edgeBonus: 0,
+        convictionMult: 1.0,
+        summary: 'Standart kaleci performansı'
+      };
+    }
+
+    const hdi = this.computeHighDangerIndex(attStats);
+    const boxShots = attStats.shotsInsideBox != null ? attStats.shotsInsideBox : Math.round(0.62 * sotFaced + 0.35 * (attStats.corners || 0));
+    const bc = attStats.bigChances || 0;
+    const wood = attStats.woodwork || 0;
+    const xg = attStats.xg || this.syntheticXg(attStats, oppStats);
+    const xgDebt = Math.max(0, xg - goals);
+    const d10Sot = attD10.shotsOnTarget || 0;
+    const d5Sot = attD5.shotsOnTarget || 0;
+    const totShots = Math.max(1, attStats.totalShots || 0);
+    const dangerPerShot = hdi / totShots;
+
+    // High danger criteria: shots inside box, big chances, woodwork, acute deltas
+    const isContinuousHighDanger = (hdi >= 8.5 || boxShots >= 3 || bc >= 1 || wood >= 1 || xgDebt >= 0.50 || (d10Sot + d5Sot) >= 2) &&
+      (dangerPerShot >= 1.35 || (boxShots / totShots) >= 0.38);
+
+    if (isContinuousHighDanger) {
+      // Unsustainable Variance: Goalkeeper facing acute post-shot xG debt; mean reversion goal arrival imminent
+      const excessSaves = Math.max(0, oppSaves - 3);
+      const griScore = Math.round(this.clamp(74, 98, 68 + excessSaves * 5 + dangerPerShot * 10));
+      return {
+        active: true,
+        regime: 'UNSUSTAINABLE_VARIANCE',
+        griScore,
+        saveCount: oppSaves,
+        saveRate: Number((saveRate * 100).toFixed(1)),
+        isMeanReversionImminent: true,
+        lambdaBoost: 1.18, // +18% next goal edge
+        edgeBonus: 18.0,
+        convictionMult: 1.12,
+        summary: `Kaleci Direnci Aşırı Varyans: Rakip kaleci ${oppSaves} kurtarışla (%${Math.round(saveRate * 100)} kurtarış yüzdesi) dirense de yoğun ceza sahası baskısı ve yüksek xG borcu sürüyor. Bu durum sürdürülemez varyanstır; ortalamaya dönüş (mean reversion) ile sıradaki gol an meselesidir (+%18 Değer Avantajı).`
+      };
+    }
+
+    // Impenetrable Wall: Routine or speculative shots from distance, solid defensive perimeter
+    const griScore = Math.round(this.clamp(42, 65, 45 + oppSaves * 3.0));
+    return {
+      active: true,
+      regime: 'IMPENETRABLE_WALL',
+      griScore,
+      saveCount: oppSaves,
+      saveRate: Number((saveRate * 100).toFixed(1)),
+      isMeanReversionImminent: false,
+      lambdaBoost: 0.92, // Damped attacking expectation
+      edgeBonus: -5.0,
+      convictionMult: 0.88,
+      summary: `Geçilmez Kaleci Duvarı: Kaleci ${oppSaves} kurtarış (%${Math.round(saveRate * 100)}) ile yüksek odak seviyesinde; hücumlar ceza sahası dışından cılız kaldığı için savunma hattı güven veriyor.`
+    };
+  }
+
+  /**
+   * Possession Quality & Pass Control Efficiency (PCE):
+   * Incorporates passAccuracy and passesCompleted vs dangerousAttacks:
+   * Distinguishes sterile back-line possession from vertical progressive siege.
+   */
+  computePassControlEfficiency(stats = {}, oppStats = {}, minute = 1) {
+    const t = Math.max(10, minute || 1);
+    const possession = stats.possession || 50;
+    const da = stats.dangerousAttacks || 0;
+    const att = stats.attacks || Math.round(da * 1.6);
+    const box = stats.shotsInsideBox != null ? stats.shotsInsideBox : Math.round(0.62 * (stats.shotsOnTarget || 0) + 0.35 * (stats.corners || 0));
+    const passesCompleted = stats.passesCompleted || stats.passesAccurate || Math.round((possession / 100) * Math.min(90, t) * 9.2);
+    const passAccuracy = stats.passAccuracy || (possession >= 55 ? 82 : (possession <= 45 ? 74 : 78));
+
+    const daConversion = att > 0 ? (da / att) : 0.45;
+    const daRate = da / t;
+    const passesPerDa = da > 0 ? (passesCompleted / da) : 25;
+
+    // Distinguish sterile possession from vertical progressive siege
+    const isSterilePossession = (possession >= 54 && passAccuracy >= 79) &&
+      (daConversion < 0.40 || daRate < 0.35 || passesPerDa > 18.0) &&
+      (box <= 2);
+
+    const isProgressiveSiege = (daConversion >= 0.52 || daRate >= 0.55 || (box >= 4 && daRate >= 0.42)) &&
+      (passesPerDa <= 12.0 || da >= 25);
+
+    let pce = 1.0;
+    let regime = 'BALANCED_POSSESSION';
+
+    if (isSterilePossession) {
+      pce = this.clamp(0.72, 0.88, 0.80 * (daConversion / 0.44));
+      regime = 'STERILE_POSSESSION';
+    } else if (isProgressiveSiege) {
+      pce = this.clamp(1.12, 1.38, 1.0 + 0.22 * (daRate / 0.50) + 0.05 * Math.min(3, box / 2));
+      regime = 'VERTICAL_PROGRESSIVE_SIEGE';
+    } else {
+      pce = this.clamp(0.88, 1.10, 0.90 + 0.20 * (daConversion / 0.48));
+      regime = 'BALANCED_POSSESSION';
+    }
+
+    return {
+      pce: Number(pce.toFixed(3)),
+      regime,
+      possession,
+      passAccuracy,
+      passesCompleted,
+      daConversion: Number((daConversion * 100).toFixed(1)),
+      daRate: Number(daRate.toFixed(2)),
+      passesPerDa: Number(passesPerDa.toFixed(1)),
+      isSterilePossession,
+      isProgressiveSiege
+    };
+  }
+
+  /**
+   * High Defensive Line & Offside Trap Vulnerability (HLOV):
+   * When a team incurs >= 3 offsides, models high defensive line space exploitation for counter-attack transition goals.
+   */
+  computeHighLineOffsideVulnerability(stats = {}, oppStats = {}, minute = 1, delta10 = {}) {
+    const offsides = stats.offsides || 0;
+    const oppOffsides = oppStats.offsides || 0;
+    const d10Off = delta10.offsides || 0;
+
+    const isTrapStressed = (offsides >= 3) || (offsides >= 2 && d10Off >= 1);
+    if (!isTrapStressed) {
+      return {
+        active: false,
+        regime: 'NORMAL',
+        offsideCount: offsides,
+        oppOffsideCount: oppOffsides,
+        spaceExploitationMult: 1.0,
+        counterVulnerability: 1.0
+      };
+    }
+
+    const excess = Math.max(0, offsides - 2);
+    const spaceExploitationMult = Number(this.clamp(1.12, 1.28, 1.10 + 0.05 * excess).toFixed(3));
+    const counterVulnerability = Number(this.clamp(1.08, 1.22, 1.06 + 0.04 * excess).toFixed(3));
+
+    return {
+      active: true,
+      regime: 'HIGH_LINE_SPACE_EXPLOITATION',
+      offsideCount: offsides,
+      oppOffsideCount: oppOffsides,
+      spaceExploitationMult,
+      counterVulnerability
+    };
+  }
+
+  /**
+   * Synthetic Vig Stripping & Market Implied Fair Probabilities:
+   * Strips bookmaker margin (overround) proportionally to calculate true fair market probability
+   */
+  stripSyntheticVig(oddsArray = [], selectionIndex = 0) {
+    if (!Array.isArray(oddsArray) || oddsArray.length === 0) {
+      return { fairOdds: 2.0, fairProb: 0.5, overround: 1.055 };
+    }
+    const validOdds = oddsArray.filter(o => o && o > 1.01);
+    const overround = validOdds.reduce((acc, o) => acc + (1 / o), 0);
+    const targetOdd = oddsArray[selectionIndex] || 2.0;
+    const rawImplied = targetOdd > 1.01 ? (1 / targetOdd) : 0.5;
+    const fairProb = overround > 0 ? (rawImplied / overround) : rawImplied;
+    const fairOdds = fairProb > 0 ? Number((1 / fairProb).toFixed(2)) : targetOdd;
+    return {
+      fairOdds,
+      fairProb: Number(fairProb.toFixed(4)),
+      overround: Number(overround.toFixed(4))
+    };
+  }
+
+  /**
    * Enhanced Synthetic xG incorporating High-Danger Index (HDI) shot components:
    * Inside-Box Shots (2.5x), Shots On Target (1.8x), Woodwork (1.6x), Big Chances (2.8x)
    */
@@ -201,9 +397,10 @@ class QuantSignalEngine {
 
   /**
    * Position Quality Multiplier Q_pos in [0.76, 1.45]
-   * Incorporates High-Danger Index (HDI): Inside-Box (2.5x), Shots On Target (1.8x), Woodwork (1.6x), Big Chance (2.8x)
+   * Incorporates High-Danger Index (HDI) and Pass Control Efficiency (PCE):
+   * Inside-Box (2.5x), Shots On Target (1.8x), Woodwork (1.6x), Big Chance (2.8x)
    */
-  computePositionQuality(stats = {}, oppStats = {}) {
+  computePositionQuality(stats = {}, oppStats = {}, minute = 1, pce = null) {
     const tot = stats.totalShots || 0;
     if (tot < 2) return 1.0;
 
@@ -222,7 +419,10 @@ class QuantSignalEngine {
     const dangerNorm = Math.min(1.0, hdi / Math.max(1, tot * 3.5));
     const highDangerBonus = (0.10 * dangerNorm) + (0.025 * Math.min(5, oppSaves));
 
-    const qPos = 0.78 + (0.38 * (2.5 / 2.0) * rBox) + (0.24 * (1.8 / 2.0) * rAcc) + highDangerBonus;
+    const effPce = pce || this.computePassControlEfficiency(stats, oppStats, minute);
+    const pceMultiplier = 0.85 + 0.15 * effPce.pce;
+
+    const qPos = (0.78 + (0.38 * (2.5 / 2.0) * rBox) + (0.24 * (1.8 / 2.0) * rAcc) + highDangerBonus) * pceMultiplier;
     return Number(this.clamp(0.76, 1.45, qPos).toFixed(3));
   }
 
@@ -277,6 +477,18 @@ class QuantSignalEngine {
         momentumA: 1.0,
         qPosH: 1.0,
         qPosA: 1.0,
+        hdiH: 0,
+        hdiA: 0,
+        griH: null,
+        griA: null,
+        griBoostH: 1.0,
+        griBoostA: 1.0,
+        pceH: null,
+        pceA: null,
+        hlovH: null,
+        hlovA: null,
+        hlovBoostH: 1.0,
+        hlovBoostA: 1.0,
         xgDebtH: 0,
         xgDebtA: 0,
         debtBoostH: 0,
@@ -325,22 +537,38 @@ class QuantSignalEngine {
     hS.xg = xgH;
     aS.xg = xgA;
 
-    const qPosH = this.computePositionQuality(hS, aS);
-    const qPosA = this.computePositionQuality(aS, hS);
+    // Goalkeeper Resistance Index (GRI):
+    const griH = flow?.griHome || this.computeGoalkeeperResistanceIndex(hS, aS, match.home?.score || 0, match.away?.score || 0, effD5H, effD10H);
+    const griA = flow?.griAway || this.computeGoalkeeperResistanceIndex(aS, hS, match.away?.score || 0, match.home?.score || 0, effD5A, effD10A);
+    const griBoostH = isScheduled ? 1.0 : (griH.active ? griH.lambdaBoost : 1.0);
+    const griBoostA = isScheduled ? 1.0 : (griA.active ? griA.lambdaBoost : 1.0);
+
+    // Pass Control Efficiency (PCE):
+    const pceH = flow?.pceHome || this.computePassControlEfficiency(hS, aS, t);
+    const pceA = flow?.pceAway || this.computePassControlEfficiency(aS, hS, t);
+
+    // High Defensive Line & Offside Trap Vulnerability (HLOV):
+    const hlovH = flow?.hlovHome || this.computeHighLineOffsideVulnerability(hS, aS, t, effD10H);
+    const hlovA = flow?.hlovAway || this.computeHighLineOffsideVulnerability(aS, hS, t, effD10A);
+    const hlovBoostH = isScheduled ? 1.0 : (hlovH.active ? hlovH.spaceExploitationMult : (hlovA.active ? hlovA.counterVulnerability : 1.0));
+    const hlovBoostA = isScheduled ? 1.0 : (hlovA.active ? hlovA.spaceExploitationMult : (hlovH.active ? hlovH.counterVulnerability : 1.0));
+
+    const qPosH = this.computePositionQuality(hS, aS, t, pceH);
+    const qPosA = this.computePositionQuality(aS, hS, t, pceA);
 
     const pIdxH = (0.35 * (hS.shotsOnTarget || 0)) +
       (0.12 * (hS.shotsOffTarget || 0)) +
       (0.14 * (hS.blockedShots || 0)) +
       (0.085 * (hS.corners || 0)) +
       (0.015 * (hS.dangerousAttacks || 0)) +
-      (0.008 * Math.max(0, (hS.possession || 50) - 50));
+      (0.010 * Math.max(0, (hS.possession || 50) - 50) * Math.max(0.1, pceH.pce - 0.70));
 
     const pIdxA = (0.35 * (aS.shotsOnTarget || 0)) +
       (0.12 * (aS.shotsOffTarget || 0)) +
       (0.14 * (aS.blockedShots || 0)) +
       (0.085 * (aS.corners || 0)) +
       (0.015 * (aS.dangerousAttacks || 0)) +
-      (0.008 * Math.max(0, (aS.possession || 50) - 50));
+      (0.010 * Math.max(0, (aS.possession || 50) - 50) * Math.max(0.1, pceA.pce - 0.70));
 
     const tSafe = isHt ? 45 : Math.max(8, t);
     const rFullH = ((0.62 * xgH + 0.38 * pIdxH) / tSafe) * 90 * qPosH;
@@ -505,8 +733,8 @@ class QuantSignalEngine {
       }
     }
 
-    const coreLambdaRemH = baseRateH * remRatioFull * omega * mH * burst5H * ccsmBoostH * lgvBoostH * gammaStateH * rhoH * pMultH * tMultH;
-    const coreLambdaRemA = baseRateA * remRatioFull * omega * mA * burst5A * ccsmBoostA * lgvBoostA * gammaStateA * rhoA * pMultA * tMultA;
+    const coreLambdaRemH = baseRateH * remRatioFull * omega * mH * burst5H * ccsmBoostH * lgvBoostH * griBoostH * hlovBoostH * gammaStateH * rhoH * pMultH * tMultH;
+    const coreLambdaRemA = baseRateA * remRatioFull * omega * mA * burst5A * ccsmBoostA * lgvBoostA * griBoostA * hlovBoostA * gammaStateA * rhoA * pMultA * tMultA;
 
     // Time-proportional realism cap: remaining goals scale with remaining time
     // (max ~2.4 goals/90 per team and ~3.4 goals/90 combined, even under heavy pressure)
@@ -549,6 +777,16 @@ class QuantSignalEngine {
       qPosA,
       hdiH,
       hdiA,
+      griH,
+      griA,
+      griBoostH,
+      griBoostA,
+      pceH,
+      pceA,
+      hlovH,
+      hlovA,
+      hlovBoostH,
+      hlovBoostA,
       ccsmBoostH,
       ccsmBoostA,
       ccsmActiveH: ccsmH.active,
@@ -767,6 +1005,17 @@ class QuantSignalEngine {
         if (lineVal !== null && lineVal > 2.5) {
           return false; // STRICTLY FORBIDDEN: Over 3.5+ prohibited on 1-1 ties
         }
+      }
+    }
+
+    // 3d. Impenetrable Goalkeeper Wall Protection:
+    // When opposing goalkeeper is in IMPENETRABLE_WALL regime with low danger-per-shot, suppress low-edge single-team attacking picks
+    if (lambdas) {
+      if ((selection.includes('MS 1') || selection.includes('Ev Sahibi')) && lambdas.griA?.regime === 'IMPENETRABLE_WALL') {
+        if ((lambdas.xgDebtH || 0) < 0.60 && (lambdas.momentumH || 1.0) < 1.25) return false;
+      }
+      if ((selection.includes('MS 2') || selection.includes('Deplasman')) && lambdas.griH?.regime === 'IMPENETRABLE_WALL') {
+        if ((lambdas.xgDebtA || 0) < 0.60 && (lambdas.momentumA || 1.0) < 1.25) return false;
       }
     }
 
@@ -1016,9 +1265,20 @@ class QuantSignalEngine {
 
     // 2. V5 QUANT MICRO-ARCHETYPE RESCUE:
     //    If macro flow archetype is MONITORING, check whether a high-conviction Quant Anomaly
-    //    (xG Debt Breakout, 5-Minute Blitz, or Bilateral xG Exchange) warrants signal hunting!
+    //    (Goalkeeper Resistance Unsustainable Variance, High-Line Trap Vulnerability, Sterile Possession Deadlock, xG Debt Breakout, 5-Minute Blitz, or Bilateral xG Exchange) warrants signal hunting!
     if (arch === 'MONITORING' && minute >= 16 && minute <= 71) {
-      if ((lambdas.xgDebtH >= 0.88 && (flow.igpHome >= 50 || lambdas.momentumH >= 1.14)) ||
+      if (lambdas.griA?.regime === 'UNSUSTAINABLE_VARIANCE' || lambdas.griH?.regime === 'UNSUSTAINABLE_VARIANCE') {
+        const homeAttack = lambdas.griA?.regime === 'UNSUSTAINABLE_VARIANCE';
+        arch = homeAttack ? 'GOALKEEPER_SIEGE_BREAKOUT_HOME' : 'GOALKEEPER_SIEGE_BREAKOUT_AWAY';
+        effectiveArchetypeLabel = `Kaleci Direnci Aşırı Varyans Kırılması (${homeAttack ? match.home.name : match.away.name} +%18 Değer)`;
+      } else if (lambdas.hlovA?.active || lambdas.hlovH?.active) {
+        const homeAttack = lambdas.hlovA?.active;
+        arch = homeAttack ? 'HIGH_LINE_TRANSITION_VULNERABILITY_HOME' : 'HIGH_LINE_TRANSITION_VULNERABILITY_AWAY';
+        effectiveArchetypeLabel = `Yüksek Savunma Hattı Geçiş Fırsatı (${homeAttack ? match.home.name : match.away.name})`;
+      } else if ((lambdas.pceH?.isSterilePossession || lambdas.pceA?.isSterilePossession) && flow.pace?.code === 'STERILE_POSSESSION_DEADLOCK') {
+        arch = 'STERILE_POSSESSION_DEADLOCK';
+        effectiveArchetypeLabel = 'Kısır Pas Sirkülasyonu Kilidi (Alt/Savunma)';
+      } else if ((lambdas.xgDebtH >= 0.88 && (flow.igpHome >= 50 || lambdas.momentumH >= 1.14)) ||
           (lambdas.xgDebtA >= 0.88 && (flow.igpAway >= 50 || lambdas.momentumA >= 1.14))) {
         const homeDebt = lambdas.xgDebtH >= lambdas.xgDebtA;
         arch = homeDebt ? 'XG_DEBT_BREAKOUT_HOME' : 'XG_DEBT_BREAKOUT_AWAY';
@@ -1054,7 +1314,9 @@ class QuantSignalEngine {
       arch === 'HALFTIME_DRAW_BREAKOUT_HOME' ||
       arch === 'HIGH_XG_UNDERPERFORMANCE_HOME' ||
       arch === 'XG_DEBT_BREAKOUT_HOME' ||
-      arch === 'FIVE_MIN_BLITZ_HOME'
+      arch === 'FIVE_MIN_BLITZ_HOME' ||
+      arch === 'GOALKEEPER_SIEGE_BREAKOUT_HOME' ||
+      arch === 'HIGH_LINE_TRANSITION_VULNERABILITY_HOME'
     ) {
       allowedMarketKeys = scoreDiff === 0 ? ['NEXT_GOAL', 'MS', 'OU', 'HT_OU'] : ['NEXT_GOAL', 'OU', 'HT_OU'];
       preferredDirection = 'HOME_ATTACK';
@@ -1067,7 +1329,9 @@ class QuantSignalEngine {
       arch === 'HALFTIME_DRAW_BREAKOUT_AWAY' ||
       arch === 'HIGH_XG_UNDERPERFORMANCE_AWAY' ||
       arch === 'XG_DEBT_BREAKOUT_AWAY' ||
-      arch === 'FIVE_MIN_BLITZ_AWAY'
+      arch === 'FIVE_MIN_BLITZ_AWAY' ||
+      arch === 'GOALKEEPER_SIEGE_BREAKOUT_AWAY' ||
+      arch === 'HIGH_LINE_TRANSITION_VULNERABILITY_AWAY'
     ) {
       allowedMarketKeys = scoreDiff === 0 ? ['NEXT_GOAL', 'MS', 'OU', 'HT_OU'] : ['NEXT_GOAL', 'OU', 'HT_OU'];
       preferredDirection = 'AWAY_ATTACK';
@@ -1086,7 +1350,7 @@ class QuantSignalEngine {
     } else if (arch === 'END_TO_END_SHOOTOUT' || arch === 'BILATERAL_XG_EXCHANGE' || arch === 'HALFTIME_SHOOTOUT') {
       allowedMarketKeys = ['BTTS', 'OU', 'HT_OU', 'HT_BTTS', 'NEXT_GOAL'];
       preferredDirection = 'BOTH_ATTACK';
-    } else if (arch === 'TACTICAL_DEADLOCK' || arch === 'HALFTIME_DEADLOCK' || arch === 'TACTICAL_STALEMATE_DRAW' || arch === 'HALFTIME_DRAW_DEADLOCK') {
+    } else if (arch === 'TACTICAL_DEADLOCK' || arch === 'HALFTIME_DEADLOCK' || arch === 'TACTICAL_STALEMATE_DRAW' || arch === 'HALFTIME_DRAW_DEADLOCK' || arch === 'STERILE_POSSESSION_DEADLOCK') {
       allowedMarketKeys = ['OU', 'HT_OU', 'BTTS', 'MS', 'NEXT_GOAL'];
       preferredDirection = 'UNDER_LOCK';
     } else if (arch === 'LATE_GAME_VOLATILITY' || arch === 'LATE_GAME_VOLATILITY_EQUALIZER') {
@@ -1191,12 +1455,13 @@ class QuantSignalEngine {
           opt.edgePct >= 4.2 &&
           opt.edgePct <= 28.0 &&
           opt.marketOdds >= 1.35 &&
-          opt.marketOdds <= 4.20
+          opt.marketOdds <= 4.20 &&
+          (opt.evPct == null || opt.evPct >= 3.0)
         ) {
           candidates.push({
             ...opt,
             archetypeLabel: effectiveArchetypeLabel,
-            sniperScore: opt.convictionScore + (opt.edgePct * 1.85)
+            sniperScore: opt.convictionScore + (opt.edgePct * 1.85) + ((opt.evPct || 0) * 0.5)
           });
         }
       }
@@ -1293,6 +1558,9 @@ class QuantSignalEngine {
       relIgp,
       relQuality = 1.0,
       relXgDebt = 0,
+      relGri = null,
+      relPce = null,
+      relHlov = null,
       reasonBuilder,
       isFirstHalfOnly = false
     }) => {
@@ -1304,31 +1572,62 @@ class QuantSignalEngine {
 
       let pMarket = pPri;
       let hasRealOdds = false;
-      if (canUsePreMatchOdds && marketOdds && marketOdds > 1.01 && Array.isArray(allMarketOdds) && allMarketOdds.every(o => o && o > 1.01)) {
-        const overround = allMarketOdds.reduce((acc, o) => acc + (1 / o), 0);
-        pMarket = (1 / marketOdds) / overround;
+      let fairMarketProb = pPri;
+
+      const hasExplicitLiveOdds = Boolean(match.odds?.isLive || match.odds?.isLiveOdds || (marketOdds && marketOdds > 1.01 && (marketKey === 'OU' || marketKey === 'NEXT_GOAL' || marketKey === 'HT_OU')));
+      const canUseOdds = canUsePreMatchOdds || hasExplicitLiveOdds;
+
+      if (canUseOdds && marketOdds && marketOdds > 1.01 && Array.isArray(allMarketOdds) && allMarketOdds.every(o => o && o > 1.01)) {
+        const selIdx = allMarketOdds.indexOf(marketOdds);
+        const vigResult = this.stripSyntheticVig(allMarketOdds, selIdx >= 0 ? selIdx : 0);
+        fairMarketProb = vigResult.fairProb;
+        pMarket = fairMarketProb;
         hasRealOdds = true;
       }
 
       // Dynamic In-Play Live Market Pricing with Realistic Bookmaker Margin:
       // Heavy favorites have ~2.5% vig; balanced lines have ~5.5% vig; longshots have ~7-10% vig
       let vigFactor = 1.055;
-      if (pMod >= 0.75) {
-        vigFactor = 1.025 + 0.03 * (1 - pMod);
-      } else if (pMod <= 0.08) {
-        vigFactor = 1.07 + 0.05 * (0.08 - pMod);
+      const refProb = hasRealOdds ? pMod : pPri;
+      if (refProb >= 0.75) {
+        vigFactor = 1.025 + 0.03 * (1 - refProb);
+      } else if (refProb <= 0.08) {
+        vigFactor = 1.07 + 0.05 * (0.08 - refProb);
       }
 
-      const calculatedLiveOdds = Number((1 / (vigFactor * pMod)).toFixed(2));
+      if (!hasRealOdds) {
+        fairMarketProb = pPri;
+        pMarket = pPri;
+      }
+
+      const calculatedLiveOdds = Number((1 / (vigFactor * pPri)).toFixed(2));
 
       const displayMarketOdds = hasRealOdds
         ? Number(marketOdds.toFixed(2))
         : Number(this.clamp(1.02, 65.00, calculatedLiveOdds).toFixed(2));
 
-      const edgeVsMarket = pMod - pMarket;
+      // Institutional Expected Value (+EV) Calculation:
+      // EV% = (p_model * O_market - 1) * 100
+      const evPct = Number(((pMod * displayMarketOdds - 1) * 100).toFixed(1));
+
+      // Goalkeeper Resistance Index (GRI) Edge & Conviction Multipliers:
+      let griEdgeBonus = 0;
+      let griConvictionMult = 1.0;
+      if (relGri && relGri.active) {
+        if (relGri.regime === 'UNSUSTAINABLE_VARIANCE') {
+          // Unsustainable Variance: opposing goalkeeper facing acute post-shot xG debt (+18% next goal edge)
+          griEdgeBonus = relGri.edgeBonus || 18.0;
+          griConvictionMult = relGri.convictionMult || 1.12;
+        } else if (relGri.regime === 'IMPENETRABLE_WALL') {
+          griConvictionMult = relGri.convictionMult || 0.88;
+        }
+      }
+
+      const edgeVsMarket = pMod - (hasRealOdds ? fairMarketProb : pPri);
       const edgeVsPrior = pMod - pPri;
       const hybridEdge = hasRealOdds ? (0.65 * edgeVsMarket + 0.35 * edgeVsPrior) : edgeVsPrior;
-      const edgePct = Number((hybridEdge * 100).toFixed(1));
+      const rawEdgePct = Number((hybridEdge * 100).toFixed(1));
+      const edgePct = Number((rawEdgePct + (griEdgeBonus > 0 ? (griEdgeBonus * 0.18) : 0)).toFixed(1));
 
       // V5 5-Pillar Conviction Score (0-100):
       // 1. Value Edge & Model Probability Floor (28%)
@@ -1361,12 +1660,12 @@ class QuantSignalEngine {
       const rawConviction = isScheduled
         ? Math.round(pMod * 100)
         : Math.round(
-            0.28 * sEdge +
+            (0.28 * sEdge +
             0.22 * sMomentum +
             0.20 * sQualityDebt +
             0.18 * sTactical +
             0.12 * steamScore +
-            deskConvictionBonus
+            deskConvictionBonus) * griConvictionMult
           );
 
       const convictionScore = allowed ? this.clamp(0, 99, rawConviction) : (isScheduled ? rawConviction : 0);
@@ -1384,7 +1683,9 @@ class QuantSignalEngine {
         line,
         modelProbPct: Number((pMod * 100).toFixed(1)),
         marketProbPct: Number((pMarket * 100).toFixed(1)),
+        fairMarketProbPct: Number((fairMarketProb * 100).toFixed(1)),
         edgePct,
+        evPct,
         fairOdds,
         marketOdds: displayMarketOdds,
         hasRealOdds,
@@ -1456,6 +1757,7 @@ class QuantSignalEngine {
         marketOdds: odds.ms1, allMarketOdds: [odds.ms1, odds.msX, odds.ms2],
         relMomentum: lambdas.momentumH * lambdas.burst5H, relIgp: flow.igpHome,
         relQuality: lambdas.qPosH, relXgDebt: lambdas.xgDebtH,
+        relGri: lambdas.griA, relPce: lambdas.pceH, relHlov: lambdas.hlovA,
         reasonBuilder: () => {
           const isHt = match.status === 'HT';
           const pfx = isHt ? 'İlk yarıda ceza sahası içinden' : 'Son 10 dakikada';
@@ -1469,6 +1771,7 @@ class QuantSignalEngine {
         marketOdds: odds.msX, allMarketOdds: [odds.ms1, odds.msX, odds.ms2],
         relMomentum: 1.05 - Math.abs(lambdas.momentumH - lambdas.momentumA), relIgp: 100 - Math.abs(flow.igpHome - flow.igpAway),
         relQuality: 1.0, relXgDebt: 0.2,
+        relGri: null, relPce: null, relHlov: null,
         reasonBuilder: () => `Taktiksel Kilit & Beraberlik: Takımların oyun üretimi dengede seyrediyor (Ev ${hStats.totalShots || 0} şut - Dep ${aStats.totalShots || 0} şut); beraberlik olasılığı %${Math.round(modelProbs.msX * 100)} seviyesinde.`
       }),
       evaluateOption({
@@ -1477,6 +1780,7 @@ class QuantSignalEngine {
         marketOdds: odds.ms2, allMarketOdds: [odds.ms1, odds.msX, odds.ms2],
         relMomentum: lambdas.momentumA * lambdas.burst5A, relIgp: flow.igpAway,
         relQuality: lambdas.qPosA, relXgDebt: lambdas.xgDebtA,
+        relGri: lambdas.griH, relPce: lambdas.pceA, relHlov: lambdas.hlovH,
         reasonBuilder: () => {
           const isHt = match.status === 'HT';
           const pfx = isHt ? 'İlk yarıda ceza sahası içinden' : 'Son 10 dakikada';
@@ -1494,6 +1798,9 @@ class QuantSignalEngine {
         relMomentum: ((lambdas.momentumH + lambdas.momentumA) / 2) * Math.max(lambdas.burst5H, lambdas.burst5A),
         relIgp: Math.max(flow.igpHome, flow.igpAway),
         relQuality: (lambdas.qPosH + lambdas.qPosA) / 2, relXgDebt: (lambdas.xgDebtH + lambdas.xgDebtA) / 1.5,
+        relGri: (lambdas.griA?.regime === 'UNSUSTAINABLE_VARIANCE' || lambdas.griH?.regime === 'UNSUSTAINABLE_VARIANCE') ? { active: true, regime: 'UNSUSTAINABLE_VARIANCE', edgeBonus: 10, convictionMult: 1.08 } : null,
+        relPce: (lambdas.pceH?.isProgressiveSiege || lambdas.pceA?.isProgressiveSiege) ? { pce: 1.15 } : null,
+        relHlov: (lambdas.hlovA?.active || lambdas.hlovH?.active) ? { active: true } : null,
         reasonBuilder: () => `Karşılıklı Hücum Tehdidi: İki takım da ceza sahasında pozisyon üretiyor (Ev ${boxH} şut/${hStats.shotsOnTarget || 0} isabet, Dep ${boxA} şut/${aStats.shotsOnTarget || 0} isabet); KG Var ihtimali %${Math.round(modelProbs.bttsYes * 100)}.`
       }),
       evaluateOption({
@@ -1502,6 +1809,9 @@ class QuantSignalEngine {
         marketOdds: odds.bttsNo, allMarketOdds: [odds.bttsYes, odds.bttsNo],
         relMomentum: 2.0 - Math.min(lambdas.momentumH, lambdas.momentumA), relIgp: 100 - Math.min(flow.igpHome, flow.igpAway),
         relQuality: 1.05, relXgDebt: 0.1,
+        relGri: (lambdas.griA?.regime === 'IMPENETRABLE_WALL' && lambdas.griH?.regime === 'IMPENETRABLE_WALL') ? { active: true, regime: 'IMPENETRABLE_WALL', convictionMult: 1.12 } : null,
+        relPce: (lambdas.pceH?.isSterilePossession && lambdas.pceA?.isSterilePossession) ? { pce: 0.82 } : null,
+        relHlov: null,
         reasonBuilder: () => `Tek Taraflı Savunma Kilidi: Hücumdaki ceza sahası uzaklığı nedeniyle takımların karşılıklı gol bulması zor görünüyor (%${Math.round(modelProbs.bttsNo * 100)} Model Olasılığı).`
       })
     ];
@@ -1515,6 +1825,9 @@ class QuantSignalEngine {
         relMomentum: Math.max(lambdas.momentumH * lambdas.burst5H, lambdas.momentumA * lambdas.burst5A),
         relIgp: Math.max(flow.igpHome, flow.igpAway),
         relQuality: maxQPos, relXgDebt: maxXgDebt,
+        relGri: (lambdas.griA?.regime === 'UNSUSTAINABLE_VARIANCE' ? lambdas.griA : (lambdas.griH?.regime === 'UNSUSTAINABLE_VARIANCE' ? lambdas.griH : null)),
+        relPce: (lambdas.pceH?.isProgressiveSiege ? lambdas.pceH : (lambdas.pceA?.isProgressiveSiege ? lambdas.pceA : null)),
+        relHlov: (lambdas.hlovA?.active ? lambdas.hlovA : (lambdas.hlovH?.active ? lambdas.hlovH : null)),
         reasonBuilder: () => {
           const isHt = match.status === 'HT';
           const timeCtx = isHt ? 'İlk yarıda' : 'Karşılaşmada';
@@ -1531,6 +1844,9 @@ class QuantSignalEngine {
         marketOdds: ftLineOdds.under, allMarketOdds: [ftLineOdds.over, ftLineOdds.under],
         relMomentum: 2.0 - ((lambdas.momentumH + lambdas.momentumA) / 2), relIgp: 100 - Math.max(flow.igpHome, flow.igpAway),
         relQuality: 1.05, relXgDebt: 0.1,
+        relGri: (lambdas.griA?.regime === 'IMPENETRABLE_WALL' && lambdas.griH?.regime === 'IMPENETRABLE_WALL') ? { active: true, regime: 'IMPENETRABLE_WALL', convictionMult: 1.14 } : null,
+        relPce: (lambdas.pceH?.isSterilePossession || lambdas.pceA?.isSterilePossession) ? { pce: 0.85 } : null,
+        relHlov: null,
         reasonBuilder: () => `Savunma Kilidi: Düşük ceza sahası şut üretimi ve ${totFouls} faul ile oyun temposu kilitlendi; ${activeLine} Alt gidişatı kuvvetli (%${Math.round(modelProbs.underProb * 100)} Model Olasılığı).`
       })
     ];
@@ -1541,7 +1857,11 @@ class QuantSignalEngine {
         pModel: modelProbs.htBttsYes, pPrior: priorProbs.htBttsYes,
         marketOdds: odds.htBttsYes, allMarketOdds: [odds.htBttsYes, odds.htBttsNo],
         relMomentum: (lambdas.momentumH + lambdas.momentumA) / 2, relIgp: Math.max(flow.igpHome, flow.igpAway),
-        relQuality: maxQPos, relXgDebt: maxXgDebt, isFirstHalfOnly: true,
+        relQuality: maxQPos, relXgDebt: maxXgDebt,
+        relGri: (lambdas.griA?.regime === 'UNSUSTAINABLE_VARIANCE' || lambdas.griH?.regime === 'UNSUSTAINABLE_VARIANCE') ? { active: true, regime: 'UNSUSTAINABLE_VARIANCE', edgeBonus: 10, convictionMult: 1.08 } : null,
+        relPce: (lambdas.pceH?.isProgressiveSiege || lambdas.pceA?.isProgressiveSiege) ? { pce: 1.15 } : null,
+        relHlov: (lambdas.hlovA?.active || lambdas.hlovH?.active) ? { active: true } : null,
+        isFirstHalfOnly: true,
         reasonBuilder: () => `İlk Yarı Açık Oyun: Devre bitmeden iki ekibin de ceza sahası içi üretimi yüksek; karşılıklı gol beklentisi öne çıkıyor.`
       }),
       evaluateOption({
@@ -1549,7 +1869,11 @@ class QuantSignalEngine {
         pModel: modelProbs.htBttsNo, pPrior: priorProbs.htBttsNo,
         marketOdds: odds.htBttsNo, allMarketOdds: [odds.htBttsYes, odds.htBttsNo],
         relMomentum: 2.0 - Math.min(lambdas.momentumH, lambdas.momentumA), relIgp: 100 - Math.min(flow.igpHome, flow.igpAway),
-        relQuality: 1.0, relXgDebt: 0, isFirstHalfOnly: true,
+        relQuality: 1.0, relXgDebt: 0,
+        relGri: (lambdas.griA?.regime === 'IMPENETRABLE_WALL' && lambdas.griH?.regime === 'IMPENETRABLE_WALL') ? { active: true, regime: 'IMPENETRABLE_WALL', convictionMult: 1.12 } : null,
+        relPce: (lambdas.pceH?.isSterilePossession && lambdas.pceA?.isSterilePossession) ? { pce: 0.82 } : null,
+        relHlov: null,
+        isFirstHalfOnly: true,
         reasonBuilder: () => `İlk Yarı Savunma Disiplini: İlk yarıda savunmalar hata yapmıyor; devre sonuna kadar karşılıklı gol çıkmama ihtimali yüksek.`
       })
     ];
@@ -1563,7 +1887,11 @@ class QuantSignalEngine {
         marketOdds: htLineOdds.over, allMarketOdds: [htLineOdds.over, htLineOdds.under],
         relMomentum: Math.max(lambdas.momentumH * lambdas.burst5H, lambdas.momentumA * lambdas.burst5A),
         relIgp: Math.max(flow.igpHome, flow.igpAway),
-        relQuality: maxQPos, relXgDebt: maxXgDebt, isFirstHalfOnly: true,
+        relQuality: maxQPos, relXgDebt: maxXgDebt,
+        relGri: (lambdas.griA?.regime === 'UNSUSTAINABLE_VARIANCE' ? lambdas.griA : (lambdas.griH?.regime === 'UNSUSTAINABLE_VARIANCE' ? lambdas.griH : null)),
+        relPce: (lambdas.pceH?.isProgressiveSiege ? lambdas.pceH : (lambdas.pceA?.isProgressiveSiege ? lambdas.pceA : null)),
+        relHlov: (lambdas.hlovA?.active ? lambdas.hlovA : (lambdas.hlovH?.active ? lambdas.hlovH : null)),
+        isFirstHalfOnly: true,
         reasonBuilder: () => `İlk Yarı Sonu Baskısı: Devre öncesi son bölümde ${d10ShotsTot} şut ve ${d10CorTot} korner üretildi; devre bitmeden İY ${htActiveLine} Üst golü bekleniyor.`
       }),
       evaluateOption({
@@ -1571,7 +1899,11 @@ class QuantSignalEngine {
         pModel: modelProbs.htUnderProb, pPrior: priorProbs.htUnderProb,
         marketOdds: htLineOdds.under, allMarketOdds: [htLineOdds.over, htLineOdds.under],
         relMomentum: 2.0 - ((lambdas.momentumH + lambdas.momentumA) / 2), relIgp: 100 - Math.max(flow.igpHome, flow.igpAway),
-        relQuality: 1.0, relXgDebt: 0, isFirstHalfOnly: true,
+        relQuality: 1.0, relXgDebt: 0,
+        relGri: (lambdas.griA?.regime === 'IMPENETRABLE_WALL' && lambdas.griH?.regime === 'IMPENETRABLE_WALL') ? { active: true, regime: 'IMPENETRABLE_WALL', convictionMult: 1.14 } : null,
+        relPce: (lambdas.pceH?.isSterilePossession || lambdas.pceA?.isSterilePossession) ? { pce: 0.85 } : null,
+        relHlov: null,
+        isFirstHalfOnly: true,
         reasonBuilder: () => `İlk Yarı Savunma Kilidi: İlk yarıda savunmalar risk almıyor; devre sonuna kadar düşük skorlu gidişat teyitli.`
       })
     ];
@@ -1584,6 +1916,7 @@ class QuantSignalEngine {
         marketOdds: odds.nextGoalHome, allMarketOdds: [odds.nextGoalHome, odds.nextGoalNo, odds.nextGoalAway],
         relMomentum: lambdas.momentumH * lambdas.burst5H, relIgp: flow.igpHome,
         relQuality: lambdas.qPosH, relXgDebt: lambdas.xgDebtH,
+        relGri: lambdas.griA, relPce: lambdas.pceH, relHlov: lambdas.hlovA,
         reasonBuilder: () => {
           const isHt = match.status === 'HT';
           const timeCtx = isHt ? 'ilk yarıda ceza sahası içinden' : 'son 10 dakikada';
@@ -1598,6 +1931,7 @@ class QuantSignalEngine {
         marketOdds: odds.nextGoalAway, allMarketOdds: [odds.nextGoalHome, odds.nextGoalNo, odds.nextGoalAway],
         relMomentum: lambdas.momentumA * lambdas.burst5A, relIgp: flow.igpAway,
         relQuality: lambdas.qPosA, relXgDebt: lambdas.xgDebtA,
+        relGri: lambdas.griH, relPce: lambdas.pceA, relHlov: lambdas.hlovH,
         reasonBuilder: () => {
           const isHt = match.status === 'HT';
           const timeCtx = isHt ? 'ilk yarıda ceza sahası içinden' : 'son 10 dakikada';
@@ -1612,6 +1946,8 @@ class QuantSignalEngine {
         marketOdds: odds.nextGoalNo, allMarketOdds: [odds.nextGoalHome, odds.nextGoalNo, odds.nextGoalAway],
         relMomentum: 2.0 - Math.max(lambdas.momentumH, lambdas.momentumA), relIgp: 100 - Math.max(flow.igpHome, flow.igpAway),
         relQuality: 1.0, relXgDebt: 0,
+        relGri: (lambdas.griA?.regime === 'IMPENETRABLE_WALL' && lambdas.griH?.regime === 'IMPENETRABLE_WALL') ? { active: true, regime: 'IMPENETRABLE_WALL', convictionMult: 1.15 } : null,
+        relPce: null, relHlov: null,
         reasonBuilder: () => `Rölanti / Savunma Kilidi: Düşük tempo ve kilitli savunmalar nedeniyle maçın başka gol olmadan ${gH}-${gA} tamamlanma ihtimali %${(modelProbs.noMoreGoals * 100).toFixed(1)}.`
       })
     ];
@@ -1625,10 +1961,11 @@ class QuantSignalEngine {
         o.confidence >= 74 &&
         o.edgePct >= 4.2 &&
         o.marketOdds >= 1.35 &&
-        o.marketOdds <= 4.20
+        o.marketOdds <= 4.20 &&
+        (o.evPct == null || o.evPct >= 3.0)
       );
       if (valid.length === 0) return null;
-      return [...valid].sort((a, b) => (b.convictionScore + b.edgePct * 1.6) - (a.convictionScore + a.edgePct * 1.6))[0];
+      return [...valid].sort((a, b) => (b.convictionScore + b.edgePct * 1.6 + (b.evPct || 0) * 0.5) - (a.convictionScore + a.edgePct * 1.6 + (a.evPct || 0) * 0.5))[0];
     };
 
     const marketBoard = {
@@ -1661,7 +1998,8 @@ class QuantSignalEngine {
             selection: o.selection,
             prob: (o.modelProbPct || 0) / 100,
             odds: o.marketOdds,
-            fairOdds: o.fairOdds
+            fairOdds: o.fairOdds,
+            evPct: o.evPct
           }))
         };
       }
@@ -1721,6 +2059,7 @@ class QuantSignalEngine {
           prob: (o.modelProbPct || 0) / 100,
           odds: o.marketOdds,
           fairOdds: o.fairOdds,
+          evPct: o.evPct,
           allowed: Boolean(o.allowedByState) && !isClosed
         }))
       };

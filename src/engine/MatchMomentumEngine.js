@@ -1,6 +1,14 @@
 /**
  * PulseBet Studio — Elite Tactical Match Momentum, Narrative & Archetype Engine (V7)
  * Institutional Quantitative Architecture:
+ *  - Goalkeeper Resistance Index (GRI):
+ *      * Monitors opposing goalkeeper saves (>= 4 saves or >= 85% save rate) under continuous high-danger shots
+ *      * Distinguishes unsustainable variance (+18% next goal edge, mean reversion goal imminent) from impenetrable wall (conviction damping)
+ *  - Possession Quality & Pass Control Efficiency (PCE):
+ *      * Incorporates passAccuracy, passesCompleted vs dangerousAttacks
+ *      * Distinguishes sterile back-line circulation from vertical progressive siege
+ *  - High Defensive Line & Offside Trap Vulnerability (HLOV):
+ *      * Evaluates space exploitation for counter-attack transition goals on >= 3 offsides
  *  - High-Danger Index (HDI): Dynamic shot danger metric:
  *      * Inside-Box Shots: 2.50x
  *      * Shots On Target: 1.80x
@@ -231,6 +239,172 @@ class MatchMomentumEngine {
   }
 
   /**
+   * Goalkeeper Resistance Index (GRI):
+   * When opposing goalkeeper records >= 4 saves or save rate >= 85% despite continuous high-danger shots,
+   * measures whether this is unsustainable variance (mean reversion goal imminent, +18% next goal edge)
+   * or total impenetrable wall (adjusting conviction downwards).
+   */
+  computeGoalkeeperResistanceIndex(attStats = {}, oppStats = {}, attScore = 0, oppScore = 0, attD5 = {}, attD10 = {}) {
+    const oppSaves = oppStats.saves || 0;
+    const goals = attScore || 0;
+    const sotFaced = (attStats.shotsOnTarget || 0) > 0 ? attStats.shotsOnTarget : (oppSaves + goals);
+    const saveRate = (oppSaves + goals) > 0 ? (oppSaves / (oppSaves + goals)) : 0;
+
+    const isTriggerCandidate = (oppSaves >= 4 || (saveRate >= 0.85 && sotFaced >= 3));
+    if (!isTriggerCandidate) {
+      return {
+        active: false,
+        regime: 'NORMAL',
+        griScore: Math.round(saveRate * 50),
+        saveCount: oppSaves,
+        saveRate: Number((saveRate * 100).toFixed(1)),
+        isMeanReversionImminent: false,
+        lambdaBoost: 1.0,
+        edgeBonus: 0,
+        convictionAdjustment: 1.0,
+        summary: 'Standart kaleci performansı'
+      };
+    }
+
+    const hdi = this.computeHighDangerIndex(attStats);
+    const boxShots = attStats.shotsInsideBox != null ? attStats.shotsInsideBox : Math.round(0.62 * sotFaced + 0.35 * (attStats.corners || 0));
+    const bc = attStats.bigChances || 0;
+    const wood = attStats.woodwork || 0;
+    const xg = attStats.xg || this.estimateTeamXg(attStats, oppStats);
+    const xgDebt = Math.max(0, xg - goals);
+    const d10Sot = attD10.shotsOnTarget || 0;
+    const d5Sot = attD5.shotsOnTarget || 0;
+    const totShots = Math.max(1, attStats.totalShots || 0);
+    const dangerPerShot = hdi / totShots;
+
+    // High danger criteria: shots inside box, big chances, woodwork, acute deltas
+    const isContinuousHighDanger = (hdi >= 8.5 || boxShots >= 3 || bc >= 1 || wood >= 1 || xgDebt >= 0.50 || (d10Sot + d5Sot) >= 2) &&
+      (dangerPerShot >= 1.35 || (boxShots / totShots) >= 0.38);
+
+    if (isContinuousHighDanger) {
+      // Unsustainable Variance: Goalkeeper facing acute post-shot xG debt; mean reversion goal arrival imminent
+      const excessSaves = Math.max(0, oppSaves - 3);
+      const griScore = Math.round(this.clamp(74, 98, 68 + excessSaves * 5 + dangerPerShot * 10));
+      return {
+        active: true,
+        regime: 'UNSUSTAINABLE_VARIANCE',
+        griScore,
+        saveCount: oppSaves,
+        saveRate: Number((saveRate * 100).toFixed(1)),
+        isMeanReversionImminent: true,
+        lambdaBoost: 1.18, // +18% next goal edge
+        edgeBonus: 18.0,
+        convictionAdjustment: 1.12,
+        summary: `Kaleci Direnci Aşırı Varyans: Rakip kaleci ${oppSaves} kurtarışla (%${Math.round(saveRate * 100)} kurtarış yüzdesi) dirense de yoğun ceza sahası baskısı ve yüksek xG borcu sürüyor. Bu durum sürdürülemez varyanstır; ortalamaya dönüş (mean reversion) ile sıradaki gol an meselesidir (+%18 Değer Avantajı).`
+      };
+    }
+
+    // Impenetrable Wall: Routine or speculative shots from distance, solid defensive perimeter
+    const griScore = Math.round(this.clamp(42, 65, 45 + oppSaves * 3.0));
+    return {
+      active: true,
+      regime: 'IMPENETRABLE_WALL',
+      griScore,
+      saveCount: oppSaves,
+      saveRate: Number((saveRate * 100).toFixed(1)),
+      isMeanReversionImminent: false,
+      lambdaBoost: 0.92, // Damped attacking expectation
+      edgeBonus: -5.0,
+      convictionAdjustment: 0.88,
+      summary: `Geçilmez Kaleci Duvarı: Kaleci ${oppSaves} kurtarış (%${Math.round(saveRate * 100)}) ile yüksek odak seviyesinde; hücumlar ceza sahası dışından cılız kaldığı için savunma hattı güven veriyor.`
+    };
+  }
+
+  /**
+   * Possession Quality & Pass Control Efficiency (PCE):
+   * Incorporates passAccuracy and passesCompleted vs dangerousAttacks:
+   * Distinguishes sterile back-line possession from vertical progressive siege.
+   */
+  computePassControlEfficiency(stats = {}, oppStats = {}, minute = 1) {
+    const t = Math.max(10, minute || 1);
+    const possession = stats.possession || 50;
+    const da = stats.dangerousAttacks || 0;
+    const att = stats.attacks || Math.round(da * 1.6);
+    const box = stats.shotsInsideBox != null ? stats.shotsInsideBox : Math.round(0.62 * (stats.shotsOnTarget || 0) + 0.35 * (stats.corners || 0));
+    const passesCompleted = stats.passesCompleted || stats.passesAccurate || Math.round((possession / 100) * Math.min(90, t) * 9.2);
+    const passAccuracy = stats.passAccuracy || (possession >= 55 ? 82 : (possession <= 45 ? 74 : 78));
+
+    const daConversion = att > 0 ? (da / att) : 0.45;
+    const daRate = da / t;
+    const passesPerDa = da > 0 ? (passesCompleted / da) : 25;
+
+    // Distinguish sterile possession from vertical progressive siege
+    const isSterilePossession = (possession >= 54 && passAccuracy >= 79) &&
+      (daConversion < 0.40 || daRate < 0.35 || passesPerDa > 18.0) &&
+      (box <= 2);
+
+    const isProgressiveSiege = (daConversion >= 0.52 || daRate >= 0.55 || (box >= 4 && daRate >= 0.42)) &&
+      (passesPerDa <= 12.0 || da >= 25);
+
+    let pce = 1.0;
+    let regime = 'BALANCED_POSSESSION';
+
+    if (isSterilePossession) {
+      pce = this.clamp(0.72, 0.88, 0.80 * (daConversion / 0.44));
+      regime = 'STERILE_POSSESSION';
+    } else if (isProgressiveSiege) {
+      pce = this.clamp(1.12, 1.38, 1.0 + 0.22 * (daRate / 0.50) + 0.05 * Math.min(3, box / 2));
+      regime = 'VERTICAL_PROGRESSIVE_SIEGE';
+    } else {
+      pce = this.clamp(0.88, 1.10, 0.90 + 0.20 * (daConversion / 0.48));
+      regime = 'BALANCED_POSSESSION';
+    }
+
+    return {
+      pce: Number(pce.toFixed(3)),
+      regime,
+      possession,
+      passAccuracy,
+      passesCompleted,
+      daConversion: Number((daConversion * 100).toFixed(1)),
+      daRate: Number(daRate.toFixed(2)),
+      passesPerDa: Number(passesPerDa.toFixed(1)),
+      isSterilePossession,
+      isProgressiveSiege
+    };
+  }
+
+  /**
+   * High Defensive Line & Offside Trap Vulnerability (HLOV):
+   * When a team incurs >= 3 offsides, models high defensive line space exploitation for counter-attack transition goals.
+   */
+  computeHighLineOffsideVulnerability(stats = {}, oppStats = {}, minute = 1, delta10 = {}) {
+    const offsides = stats.offsides || 0;
+    const oppOffsides = oppStats.offsides || 0;
+    const d10Off = delta10.offsides || 0;
+
+    const isTrapStressed = (offsides >= 3) || (offsides >= 2 && d10Off >= 1);
+    if (!isTrapStressed) {
+      return {
+        active: false,
+        regime: 'NORMAL',
+        offsideCount: offsides,
+        oppOffsideCount: oppOffsides,
+        spaceExploitationMult: 1.0,
+        counterVulnerability: 1.0
+      };
+    }
+
+    const excess = Math.max(0, offsides - 2);
+    const spaceExploitationMult = Number(this.clamp(1.12, 1.28, 1.10 + 0.05 * excess).toFixed(3));
+    const counterVulnerability = Number(this.clamp(1.08, 1.22, 1.06 + 0.04 * excess).toFixed(3));
+
+    return {
+      active: true,
+      regime: 'HIGH_LINE_SPACE_EXPLOITATION',
+      offsideCount: offsides,
+      oppOffsideCount: oppOffsides,
+      spaceExploitationMult, // Boost for team exploiting space in behind
+      counterVulnerability   // Boost for opponent transition on turnovers
+    };
+  }
+
+  /**
    * Extract true 2nd-Half vs 1st-Half stats when available and hydrate cold-start sliding windows
    */
   extractActivePeriodStats(match, d5, d10) {
@@ -325,8 +499,9 @@ class MatchMomentumEngine {
    * V5 Period-Aware Goal Pressure Index (GPI 0-100):
    * In the 2nd half (minute >= 48), heavily weights 5m, 10m, and 2nd-Half rate (95% combined)
    * and reduces 1st-half cumulative dilution to 5%.
+   * Incorporates Pass Control Efficiency (PCE) and Goalkeeper Resistance Index (GRI) multipliers.
    */
-  computeTeamGpi(minute, d5, d10, fullStats, half2Stats = null, varBoost = 1.0, scoreStateDecay = 1.0, isHt = false) {
+  computeTeamGpi(minute, d5, d10, fullStats, half2Stats = null, varBoost = 1.0, scoreStateDecay = 1.0, isHt = false, pceMult = 1.0, griBoost = 1.0) {
     const t = isHt ? 45 : Math.max(5, minute || 1);
     const t5m = this.computeRawSts(d5) * 2.0;
     const t10m = this.computeRawSts(d10);
@@ -346,8 +521,12 @@ class MatchMomentumEngine {
       }
     }
 
+    // Pass Control Efficiency (PCE) dynamic impact: sterile possession damped, vertical progressive siege amplified
+    const pceCoeff = 0.82 + 0.18 * (pceMult || 1.0);
+    baseTempo *= pceCoeff;
+
     const { alphaBox, alphaEff } = this.computeQualityMultipliers(activeQualityStats);
-    const pRaw = baseTempo * alphaBox * alphaEff * varBoost * scoreStateDecay;
+    const pRaw = baseTempo * alphaBox * alphaEff * varBoost * scoreStateDecay * (griBoost || 1.0);
     const gpi = 100 * (1 - Math.exp(-pRaw / 17.2));
     return Math.round(this.clamp(0, 100, gpi));
   }
@@ -376,7 +555,7 @@ class MatchMomentumEngine {
     return Math.round(this.clamp(0, 100, dpi));
   }
 
-  classifyMatchPace(d10Home, d10Away, fullHome, fullAway, minute, gpiH, gpiA, scoreH = 0, scoreA = 0) {
+  classifyMatchPace(d10Home, d10Away, fullHome, fullAway, minute, gpiH, gpiA, scoreH = 0, scoreA = 0, pceHome = null, pceAway = null) {
     const t = Math.max(10, minute || 10);
     const totShots10 = (d10Home.totalShots || 0) + (d10Away.totalShots || 0) ||
       (((fullHome.totalShots || 0) + (fullAway.totalShots || 0)) / t) * 10;
@@ -415,6 +594,26 @@ class MatchMomentumEngine {
       }
     }
 
+    // Possession Quality & Pass Control Efficiency (PCE) Deadlock: Sterile back-line circulation
+    if (
+      (pceHome?.isSterilePossession || pceAway?.isSterilePossession) &&
+      actionDensity < 0.32 &&
+      fdr < 1.10
+    ) {
+      return {
+        code: 'STERILE_POSSESSION_DEADLOCK',
+        label: 'Steril Top Çevirme / Düşük Tehdit',
+        badgeColor: 'slate',
+        actionDensity,
+        disruptionIndex,
+        fdr,
+        tempoMultHome: 0.82,
+        tempoMultAway: 0.82,
+        overMult: 0.68,
+        underMult: 1.34
+      };
+    }
+
     if (disruptionIndex >= 0.42 && (actionDensity >= 0.40 || Math.max(gpiH, gpiA) >= 66)) {
       return {
         code: 'SET_PIECE_CHAOS',
@@ -430,7 +629,7 @@ class MatchMomentumEngine {
       };
     }
 
-    if (actionDensity >= 0.44 && disruptionIndex <= 0.30 && fdr >= 1.55) {
+    if (actionDensity >= 0.40 && (pceHome?.isProgressiveSiege || pceAway?.isProgressiveSiege || (actionDensity >= 0.44 && disruptionIndex <= 0.30 && fdr >= 1.55))) {
       return {
         code: 'HIGH_FLOW',
         label: 'Akıcı / Yüksek Tempo',
@@ -475,9 +674,9 @@ class MatchMomentumEngine {
   }
 
   /**
-   * Detect Specific In-Play Signal Hunter Archetype (12 Total States + V7 Late Game Volatility Index)
+   * Detect Specific In-Play Signal Hunter Archetype (15 Total States + V7 Late Game Volatility, GRI & HLOV)
    */
-  detectArchetypeAndNarrative(match, gpiHome, gpiAway, dpiHome, dpiAway, igpHome, igpAway, pace, d5, d10, periodInfo, lgv = null, ccsm = null) {
+  detectArchetypeAndNarrative(match, gpiHome, gpiAway, dpiHome, dpiAway, igpHome, igpAway, pace, d5, d10, periodInfo, lgv = null, ccsm = null, gri = null, pce = null, hlov = null) {
     const hS = match.home.stats || {};
     const aS = match.away.stats || {};
     const totShots = (hS.totalShots || 0) + (aS.totalShots || 0);
@@ -705,6 +904,53 @@ class MatchMomentumEngine {
       }
     }
 
+    // 6b. [V7 NEW] GOALKEEPER_SIEGE_BREAKOUT — Kaleci Direnci Kırılması & Varyans Düzeltmesi (15' - 74')
+    if (gri && min >= 15 && min <= 74 && absDiff <= 1) {
+      if (gri.home?.regime === 'UNSUSTAINABLE_VARIANCE' && igpHome >= 50) {
+        return {
+          archetype: 'GOALKEEPER_SIEGE_BREAKOUT_HOME',
+          archetypeLabel: `Kaleci Direnci Kırılması & Varyans Düzeltmesi (${match.home.name})`,
+          narrative: `Kaleci Direnci Kırılması: Rakip kaleci ${gri.home.saveCount} kurtarış (%${Math.round(gri.home.saveRate)} kurtarış yüzdesi) ile direnmeye çalışsa da ${match.home.name} ceza sahası içinden ${boxH} şut ve yoğun xG borcu üretti. İstatistiksel aşırı varyansın ortalamaya dönüşüyle sıradaki gol an meselesidir (+%18 Değer Avantajı / %84 Güven).`
+        };
+      }
+      if (gri.away?.regime === 'UNSUSTAINABLE_VARIANCE' && igpAway >= 50) {
+        return {
+          archetype: 'GOALKEEPER_SIEGE_BREAKOUT_AWAY',
+          archetypeLabel: `Kaleci Direnci Kırılması & Varyans Düzeltmesi (${match.away.name})`,
+          narrative: `Kaleci Direnci Kırılması: Rakip kaleci ${gri.away.saveCount} kurtarış (%${Math.round(gri.away.saveRate)} kurtarış yüzdesi) ile direnmeye çalışsa da ${match.away.name} ceza sahası içinden ${boxA} şut ve yoğun xG borcu üretti. İstatistiksel aşırı varyansın ortalamaya dönüşüyle sıradaki gol an meselesidir (+%18 Değer Avantajı / %84 Güven).`
+        };
+      }
+    }
+
+    // 6c. [V7 NEW] HIGH_LINE_TRANSITION_VULNERABILITY — Yüksek Savunma Hattı & Ofsayt Tuzağı Açığı (18' - 74')
+    if (hlov && min >= 18 && min <= 74 && absDiff <= 1) {
+      if (hlov.home?.active && (hlov.home.offsideCount >= 3 || (d10?.home?.offsides || 0) >= 1)) {
+        return {
+          archetype: 'HIGH_LINE_TRANSITION_VULNERABILITY_HOME',
+          archetypeLabel: `Yüksek Savunma Hattı & Ofsayt Tuzağı Açığı (${match.home.name})`,
+          narrative: `Yüksek Savunma Hattı & Geçiş Tehdidi: ${match.home.name} ${hlov.home.offsideCount} kez ofsayta düşerek rakip savunma arkasını zorladı. Deplasman ekibinin kurduğu riskli yüksek çizgi, tek bir kırılmada mutlak karşı karşıya geçiş golü yaratabilir (+%${Math.round((hlov.home.spaceExploitationMult - 1) * 100)} İvme / %80 Güven).`
+        };
+      }
+      if (hlov.away?.active && (hlov.away.offsideCount >= 3 || (d10?.away?.offsides || 0) >= 1)) {
+        return {
+          archetype: 'HIGH_LINE_TRANSITION_VULNERABILITY_AWAY',
+          archetypeLabel: `Yüksek Savunma Hattı & Ofsayt Tuzağı Açığı (${match.away.name})`,
+          narrative: `Yüksek Savunma Hattı & Geçiş Tehdidi: ${match.away.name} ${hlov.away.offsideCount} kez ofsayta düşerek rakip savunma arkasını zorladı. Ev sahibinin yüksek savunma bloğu arkasında geniş boşluklar oluştu; kontra geçiş golü ihtimali yüksek (+%${Math.round((hlov.away.spaceExploitationMult - 1) * 100)} İvme / %80 Güven).`
+        };
+      }
+    }
+
+    // 6d. [V7 NEW] STERILE_POSSESSION_DEADLOCK — Steril Top Çevirme & Kompakt Savunma Duvarı
+    if (pace.code === 'STERILE_POSSESSION_DEADLOCK' && min >= 25 && min <= 70) {
+      const sterileHome = pce?.home?.isSterilePossession;
+      const sterileTeam = sterileHome ? match.home.name : match.away.name;
+      return {
+        archetype: 'STERILE_POSSESSION_DEADLOCK',
+        archetypeLabel: `Steril Top Çevirme (${sterileTeam})`,
+        narrative: `Steril Top Çevirme & Savunma Bloğu: ${sterileTeam} topla oynama oranında üstün görünse de hücumları üçüncü bölgeye taşımakta zorlanıyor (düşük tehlikeli atak penetrasyonu). Ceza sahası dışı yatay pas trafiği oyunu soğutuyor; düşük skor beklentisi teyitli.`
+      };
+    }
+
     // 7. [V5 NEW] FAVORITE_TRAILING_SURGE — Ağır Favori Geri Dönüş Baskısı (14' - 68')
     const open1 = match.odds?.openMs1 || match.odds?.ms1 || 2.50;
     const open2 = match.odds?.openMs2 || match.odds?.ms2 || 2.90;
@@ -902,8 +1148,9 @@ class MatchMomentumEngine {
   /**
    * Build 3-to-5-Dimensional Analytical Proof Array (`evidenceFactors`) for UI & Signal Explainability
    * Strictly produces between 3 and 5 evidence factors for every archetype.
+   * Incorporates Goalkeeper Resistance Index (GRI), Pass Control Efficiency (PCE), and High-Line Offside Vulnerability (HLOV).
    */
-  buildEvidenceFactors(match, gpiHome, gpiAway, dpiHome, dpiAway, igpHome, igpAway, pace, d5, d10, periodInfo, archetype = 'MONITORING', lgv = null, ccsm = null) {
+  buildEvidenceFactors(match, gpiHome, gpiAway, dpiHome, dpiAway, igpHome, igpAway, pace, d5, d10, periodInfo, archetype = 'MONITORING', lgv = null, ccsm = null, gri = null, pce = null, hlov = null) {
     const hS = match.home?.stats || {};
     const aS = match.away?.stats || {};
     const scoreH = match.home?.score || 0;
@@ -1122,9 +1369,12 @@ class MatchMomentumEngine {
     const hdiH = this.computeHighDangerIndex(hS);
     const hdiA = this.computeHighDangerIndex(aS);
 
-    // 1. ATTACK_QUALITY (Pozisyon & xG Kalitesi - Ceza sahası 2.5x, İsabet 1.8x, Direk 1.6x, Net Fırsat 2.8x)
+    // 1. ATTACK_QUALITY (Pozisyon & xG Kalitesi - Ceza sahası 2.5x, İsabet 1.8x, Direk 1.6x, Net Fırsat 2.8x, PCE)
+    const maxPce = Math.max(pce?.home?.pce || 1.0, pce?.away?.pce || 1.0);
+    const pceBadgeText = maxPce >= 1.15 ? 'Dikey Kuşatma' : (maxPce <= 0.88 ? 'Steril Top Çevirme' : 'Dengeli');
     const qualityScore = Math.round(this.clamp(10, 99, (xgH + xgA) * 26 + (boxH + boxA) * 3.5 + totSot * 5 + bcTot * 12 + woodTot * 10));
     const attackSummary = `Ceza sahası içi şut: Ev ${boxH} • Dep ${boxA} (HDI: Ev ${hdiH} • Dep ${hdiA})` +
+      ` • Pas Verimliliği (PCE): ${pceBadgeText} (${maxPce.toFixed(2)})` +
       (bcTot + woodTot > 0 ? ` (${bcTot} net pozisyon, ${woodTot} direk)` : '') +
       ` • Toplam ${totSot} isabetli şut`;
 
@@ -1139,13 +1389,28 @@ class MatchMomentumEngine {
     const velocityScore = Math.round(this.clamp(12, 99, Math.max(gpiHome, gpiAway) * 0.72 + d5Shots * 8 + d10Cor * 4));
     const tempoSummary = `Son 10 dakikada ${Math.round(d10Shots)} şut ve ${Math.round(d10Cor)} korner üretildi${h2Text} (${pace?.label || 'Dengeli Akış'})`;
 
-    // 3. DEFENSIVE_RESISTANCE (Savunma Direnci & Panik Endeksi)
+    // 3. DEFENSIVE_RESISTANCE (Savunma Direnci, DPI & Kaleci Direnci GRI)
     const maxDpi = Math.max(dpiHome, dpiAway);
     const panicSide = dpiHome >= dpiAway ? match.home?.name || 'Ev Sahibi' : match.away?.name || 'Deplasman';
     const totSaves = (hS.saves || 0) + (aS.saves || 0);
     const totBlk = (hS.blockedShots || 0) + (aS.blockedShots || 0);
     const defLevel = maxDpi >= 64 ? 'ağır baskı altında' : (maxDpi >= 42 ? 'zorlanıyor' : 'dengede');
-    const tempoSummaryDef = `${panicSide} savunması ${defLevel} (${totSaves} kaleci kurtarışı, ${totBlk} engellenen şut)`;
+
+    const griH = gri?.home;
+    const griA = gri?.away;
+    const isGriUnsustainable = (griH?.regime === 'UNSUSTAINABLE_VARIANCE') || (griA?.regime === 'UNSUSTAINABLE_VARIANCE');
+    const isGriWall = (griH?.regime === 'IMPENETRABLE_WALL') || (griA?.regime === 'IMPENETRABLE_WALL');
+
+    let defBadge = maxDpi >= 64 ? 'Zorlanıyor' : (maxDpi >= 42 ? 'Baskı altında' : 'Dengeli');
+    let tempoSummaryDef = `${panicSide} savunması ${defLevel} (${totSaves} kaleci kurtarışı, ${totBlk} engellenen şut)`;
+
+    if (isGriUnsustainable) {
+      const activeGri = griH?.regime === 'UNSUSTAINABLE_VARIANCE' ? griH : griA;
+      defBadge = 'Aşırı Varyans (+%18 Edge)';
+      tempoSummaryDef = `Rakip kaleci ${activeGri.saveCount} kurtarış (%${Math.round(activeGri.saveRate)}%) ile dirense de sürdürülemez varyans devrede; ortalamaya dönüş golü an meselesidir (+%18 Değer Avantajı).`;
+    } else if (isGriWall) {
+      defBadge = 'Geçilmez Duvar';
+    }
 
     // 4. MARKET_PSYCHOLOGY (Skor Psikolojisi & Gol Borcu)
     const debtH = Math.max(0, xgH - scoreH);
@@ -1353,11 +1618,11 @@ class MatchMomentumEngine {
       },
       {
         key: 'DEFENSIVE_RESISTANCE',
-        title: 'Savunma Durumu',
-        badge: maxDpi >= 64 ? 'Zorlanıyor' : (maxDpi >= 42 ? 'Baskı altında' : 'Dengeli'),
+        title: 'Savunma & Kaleci Direnci',
+        badge: defBadge,
         summary: tempoSummaryDef,
-        score: maxDpi,
-        tone: maxDpi >= 64 ? 'rose' : (maxDpi >= 42 ? 'amber' : 'blue')
+        score: isGriUnsustainable ? (griH?.regime === 'UNSUSTAINABLE_VARIANCE' ? griH.griScore : griA.griScore) : maxDpi,
+        tone: isGriUnsustainable ? 'emerald' : (maxDpi >= 64 ? 'rose' : (maxDpi >= 42 ? 'amber' : 'blue'))
       },
       {
         key: 'MARKET_PSYCHOLOGY',
@@ -1370,7 +1635,29 @@ class MatchMomentumEngine {
     ];
 
     // Archetype-Specific 5th Factor (Cap at 5 factors max)
-    if (archetype === 'SIEGE_HOME' || archetype === 'SIEGE_AWAY') {
+    if (isGriUnsustainable && factors.length < 5) {
+      const activeGri = griH?.regime === 'UNSUSTAINABLE_VARIANCE' ? griH : griA;
+      const attTeam = griH?.regime === 'UNSUSTAINABLE_VARIANCE' ? match.home?.name : match.away?.name;
+      factors.push({
+        key: 'GRI_VARIANCE_EDGE',
+        title: 'Kaleci Direnci & Ortalamaya Dönüş',
+        badge: '+%18 Değer Avantajı',
+        summary: `${attTeam || 'Hücum takımı'} yoğun xG borcu ve ceza sahası baskısıyla rakip kaleciyi (${activeGri.saveCount} kurtarış) aşırı varyansa zorladı; ortalamaya dönüş sıradaki golü tetikleyecek.`,
+        score: activeGri.griScore || 88,
+        tone: 'emerald'
+      });
+    } else if ((hlov?.home?.active || hlov?.away?.active) && factors.length < 5) {
+      const activeHlov = hlov.home?.active ? hlov.home : hlov.away;
+      const tName = hlov.home?.active ? match.home?.name : match.away?.name;
+      factors.push({
+        key: 'HIGH_LINE_EXPLOITATION',
+        title: 'Yüksek Savunma Hattı & Ofsayt Açığı',
+        badge: 'Geçiş Golü Tehdidi',
+        summary: `${tName || 'Takım'} ${activeHlov.offsideCount} kez ofsayta düşerek rakip yüksek hattını yıprattı; savunma arkası boşluklardan kontra geçiş golü ihtimali yüksek (+%${Math.round((activeHlov.spaceExploitationMult - 1) * 100)} İvme).`,
+        score: Math.round(this.clamp(72, 94, 70 + activeHlov.offsideCount * 6)),
+        tone: 'amber'
+      });
+    } else if (archetype === 'SIEGE_HOME' || archetype === 'SIEGE_AWAY') {
       const domTeam = archetype === 'SIEGE_HOME' ? match.home?.name : match.away?.name;
       factors.push({
         key: 'SIEGE_DOMINANCE',
@@ -1528,14 +1815,26 @@ class MatchMomentumEngine {
     const h2Home = periodInfo.hasHalf2Data ? periodInfo.half2.home : null;
     const h2Away = periodInfo.hasHalf2Data ? periodInfo.half2.away : null;
 
+    // Goalkeeper Resistance Index (GRI) for both teams
+    const griHome = this.computeGoalkeeperResistanceIndex(hStats, aStats, match.home?.score || 0, match.away?.score || 0, d5.home, d10.home);
+    const griAway = this.computeGoalkeeperResistanceIndex(aStats, hStats, match.away?.score || 0, match.home?.score || 0, d5.away, d10.away);
+
+    // Possession Quality & Pass Control Efficiency (PCE)
+    const pceHome = this.computePassControlEfficiency(hStats, aStats, minute);
+    const pceAway = this.computePassControlEfficiency(aStats, hStats, minute);
+
+    // High Defensive Line & Offside Trap Vulnerability (HLOV)
+    const hlovHome = this.computeHighLineOffsideVulnerability(hStats, aStats, minute, d10.home);
+    const hlovAway = this.computeHighLineOffsideVulnerability(aStats, hStats, minute, d10.away);
+
     const isHt = match.status === 'HT';
     const effMin = isHt ? 45 : minute;
     const gpiHome = match.status === 'FT'
       ? 0
-      : this.computeTeamGpi(effMin, d5.home, d10.home, hStats, h2Home, recentVarHome ? 1.18 : 1.0, decayH, isHt);
+      : this.computeTeamGpi(effMin, d5.home, d10.home, hStats, h2Home, recentVarHome ? 1.18 : 1.0, decayH, isHt, pceHome.pce, griHome.lambdaBoost);
     const gpiAway = match.status === 'FT'
       ? 0
-      : this.computeTeamGpi(effMin, d5.away, d10.away, aStats, h2Away, recentVarAway ? 1.18 : 1.0, decayA, isHt);
+      : this.computeTeamGpi(effMin, d5.away, d10.away, aStats, h2Away, recentVarAway ? 1.18 : 1.0, decayA, isHt, pceAway.pce, griAway.lambdaBoost);
 
     const dpiHome = match.status === 'FT' ? 0 : this.computeDefensivePanic(gpiAway, d10.away, d5.home, d10.home);
     const dpiAway = match.status === 'FT' ? 0 : this.computeDefensivePanic(gpiHome, d10.home, d5.away, d10.away);
@@ -1559,12 +1858,12 @@ class MatchMomentumEngine {
     // Late Game Volatility Index (LGV) evaluation (minutes 68-88 with 1-goal margin)
     const lgv = this.evaluateLateGameVolatility(match, d5, d10, gpiHome, gpiAway, igpHome, igpAway);
 
-    const pace = this.classifyMatchPace(d10.home, d10.away, hStats, aStats, minute, gpiHome, gpiAway, match.home?.score || 0, match.away?.score || 0);
+    const pace = this.classifyMatchPace(d10.home, d10.away, hStats, aStats, minute, gpiHome, gpiAway, match.home?.score || 0, match.away?.score || 0, pceHome, pceAway);
     const { archetype, archetypeLabel, narrative } = this.detectArchetypeAndNarrative(
-      match, gpiHome, gpiAway, dpiHome, dpiAway, igpHome, igpAway, pace, d5, d10, periodInfo, lgv, { home: ccsmHome, away: ccsmAway }
+      match, gpiHome, gpiAway, dpiHome, dpiAway, igpHome, igpAway, pace, d5, d10, periodInfo, lgv, { home: ccsmHome, away: ccsmAway }, { home: griHome, away: griAway }, { home: pceHome, away: pceAway }, { home: hlovHome, away: hlovAway }
     );
     const evidenceFactors = this.buildEvidenceFactors(
-      match, gpiHome, gpiAway, dpiHome, dpiAway, igpHome, igpAway, pace, d5, d10, periodInfo, archetype, lgv, { home: ccsmHome, away: ccsmAway }
+      match, gpiHome, gpiAway, dpiHome, dpiAway, igpHome, igpAway, pace, d5, d10, periodInfo, archetype, lgv, { home: ccsmHome, away: ccsmAway }, { home: griHome, away: griAway }, { home: pceHome, away: pceAway }, { home: hlovHome, away: hlovAway }
     );
 
     return {
@@ -1583,6 +1882,12 @@ class MatchMomentumEngine {
       lgv,
       hdiHome,
       hdiAway,
+      griHome,
+      griAway,
+      pceHome,
+      pceAway,
+      hlovHome,
+      hlovAway,
       hasHalf2Data: periodInfo.hasHalf2Data,
       half2Stats: periodInfo.half2 || null,
       imminentGoalAlert: (match.status === 'LIVE' && minute < 75 && (igpHome >= 66 || igpAway >= 66)),
