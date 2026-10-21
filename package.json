@@ -6,6 +6,14 @@
   "scripts": {
     "start": "node src/server.js"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/menostayit-ui/pulsebet-studio.git"
+  },
+  "bugs": {
+    "url": "https://github.com/menostayit-ui/pulsebet-studio/issues"
+  },
+  "homepage": "https://github.com/menostayit-ui/pulsebet-studio#readme",
   "keywords": [
     "football",
     "soccer",
@@ -15,9 +23,12 @@
     "quantitative-finance",
     "dixon-coles",
     "poisson-model",
-    "websocket"
+    "sports-betting",
+    "real-time",
+    "websocket",
+    "value-betting"
   ],
-  "author": "PulseBet Core Contributors",
+  "author": "menostayit-ui",
   "license": "MIT",
   "dependencies": {
     "ws": "^8.18.0"
