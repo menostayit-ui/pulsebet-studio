@@ -258,41 +258,50 @@ class QuantSignalEngine {
 
   /**
    * Possession Quality & Pass Control Efficiency (PCE):
-   * Incorporates passAccuracy and passesCompleted vs dangerousAttacks:
-   * Distinguishes sterile back-line possession from vertical progressive siege.
+   * Incorporates passAccuracy, passesCompleted vs dangerousAttacks, and UEFA-Pro Field Tilt:
+   * Field Tilt = (dangerousAttacks_team / Math.max(1, dangerousAttacks_H + dangerousAttacks_A)) * 100
+   * Distinguishes sterile back-line circulation from vertical progressive siege.
    */
   computePassControlEfficiency(stats = {}, oppStats = {}, minute = 1) {
     const t = Math.max(10, minute || 1);
     const possession = stats.possession || 50;
     const da = stats.dangerousAttacks || 0;
+    const oppDa = oppStats.dangerousAttacks || 0;
     const att = stats.attacks || Math.round(da * 1.6);
     const box = stats.shotsInsideBox != null ? stats.shotsInsideBox : Math.round(0.62 * (stats.shotsOnTarget || 0) + 0.35 * (stats.corners || 0));
     const passesCompleted = stats.passesCompleted || stats.passesAccurate || Math.round((possession / 100) * Math.min(90, t) * 9.2);
     const passAccuracy = stats.passAccuracy || (possession >= 55 ? 82 : (possession <= 45 ? 74 : 78));
 
+    // Field Tilt & Progressive Penetration (UEFA-Pro Metric):
+    // Territorial dominance in final third: share of dangerous attacks relative to match total
+    const fieldTilt = Number(((da / Math.max(1, da + oppDa)) * 100).toFixed(1));
+
     const daConversion = att > 0 ? (da / att) : 0.45;
     const daRate = da / t;
     const passesPerDa = da > 0 ? (passesCompleted / da) : 25;
 
-    // Distinguish sterile possession from vertical progressive siege
+    // Distinguish sterile back-line circulation from vertical progressive siege using Field Tilt & Pass Control Efficiency
     const isSterilePossession = (possession >= 54 && passAccuracy >= 79) &&
-      (daConversion < 0.40 || daRate < 0.35 || passesPerDa > 18.0) &&
+      (fieldTilt < 45 || daConversion < 0.40 || daRate < 0.35 || passesPerDa > 18.0) &&
       (box <= 2);
 
-    const isProgressiveSiege = (daConversion >= 0.52 || daRate >= 0.55 || (box >= 4 && daRate >= 0.42)) &&
-      (passesPerDa <= 12.0 || da >= 25);
+    const isProgressiveSiege = (fieldTilt >= 55 || daConversion >= 0.52 || daRate >= 0.55 || (box >= 4 && daRate >= 0.42)) &&
+      (passesPerDa <= 13.0 || da >= 25 || fieldTilt >= 62);
 
     let pce = 1.0;
     let regime = 'BALANCED_POSSESSION';
 
     if (isSterilePossession) {
-      pce = this.clamp(0.72, 0.88, 0.80 * (daConversion / 0.44));
+      const tiltDamp = Math.min(1.0, fieldTilt / 50);
+      pce = this.clamp(0.70, 0.88, 0.80 * (daConversion / 0.44) * tiltDamp);
       regime = 'STERILE_POSSESSION';
     } else if (isProgressiveSiege) {
-      pce = this.clamp(1.12, 1.38, 1.0 + 0.22 * (daRate / 0.50) + 0.05 * Math.min(3, box / 2));
+      const tiltBoost = Math.max(1.0, fieldTilt / 50);
+      pce = this.clamp(1.12, 1.42, (1.0 + 0.20 * (daRate / 0.50) + 0.05 * Math.min(3, box / 2)) * Math.min(1.15, tiltBoost));
       regime = 'VERTICAL_PROGRESSIVE_SIEGE';
     } else {
-      pce = this.clamp(0.88, 1.10, 0.90 + 0.20 * (daConversion / 0.48));
+      const tiltFactor = this.clamp(0.92, 1.08, fieldTilt / 50);
+      pce = this.clamp(0.88, 1.12, (0.90 + 0.20 * (daConversion / 0.48)) * tiltFactor);
       regime = 'BALANCED_POSSESSION';
     }
 
@@ -300,6 +309,7 @@ class QuantSignalEngine {
       pce: Number(pce.toFixed(3)),
       regime,
       possession,
+      fieldTilt,
       passAccuracy,
       passesCompleted,
       daConversion: Number((daConversion * 100).toFixed(1)),
@@ -347,22 +357,59 @@ class QuantSignalEngine {
 
   /**
    * Synthetic Vig Stripping & Market Implied Fair Probabilities:
-   * Strips bookmaker margin (overround) proportionally to calculate true fair market probability
+   * Non-Uniform Vig Stripping & Market Implied Fair Probabilities:
+   * Strips bookmaker margin (overround) with power exponent weighting (Favorite-Longshot Bias correction)
+   * rather than uniform division, preventing synthetic +EV inflation on longshots.
    */
   stripSyntheticVig(oddsArray = [], selectionIndex = 0) {
     if (!Array.isArray(oddsArray) || oddsArray.length === 0) {
-      return { fairOdds: 2.0, fairProb: 0.5, overround: 1.055 };
+      return { fairOdds: 2.0, fairProb: 0.5, overround: 1.055, method: 'POWER_FLB' };
     }
     const validOdds = oddsArray.filter(o => o && o > 1.01);
-    const overround = validOdds.reduce((acc, o) => acc + (1 / o), 0);
+    if (validOdds.length === 0) {
+      return { fairOdds: 2.0, fairProb: 0.5, overround: 1.055, method: 'DEFAULT' };
+    }
+
+    const rawImplieds = validOdds.map(o => 1 / o);
+    const overround = rawImplieds.reduce((acc, p) => acc + p, 0);
+
+    let fairProbs = [];
+    if (overround <= 1.0001) {
+      fairProbs = rawImplieds.map(p => p / overround);
+    } else {
+      // Non-Uniform Vig Stripping via Power Exponent (Favorite-Longshot Bias Correction)
+      let low = 1.0;
+      let high = 5.0;
+      while (rawImplieds.reduce((acc, p) => acc + Math.pow(p, high), 0) > 1.0 && high < 20.0) {
+        high *= 2.0;
+      }
+      for (let iter = 0; iter < 25; iter++) {
+        const mid = (low + high) / 2;
+        const sumMid = rawImplieds.reduce((acc, p) => acc + Math.pow(p, mid), 0);
+        if (sumMid > 1.0) {
+          low = mid;
+        } else {
+          high = mid;
+        }
+      }
+      const k = (low + high) / 2;
+      const powered = rawImplieds.map(p => Math.pow(p, k));
+      const sumPowered = powered.reduce((acc, p) => acc + p, 0);
+      fairProbs = powered.map(p => p / sumPowered);
+    }
+
     const targetOdd = oddsArray[selectionIndex] || 2.0;
-    const rawImplied = targetOdd > 1.01 ? (1 / targetOdd) : 0.5;
-    const fairProb = overround > 0 ? (rawImplied / overround) : rawImplied;
+    const targetIdxInValid = validOdds.indexOf(targetOdd);
+    const fairProb = targetIdxInValid >= 0
+      ? fairProbs[targetIdxInValid]
+      : (fairProbs[0] || (targetOdd > 1.01 ? (1 / targetOdd) : 0.5));
+
     const fairOdds = fairProb > 0 ? Number((1 / fairProb).toFixed(2)) : targetOdd;
     return {
       fairOdds,
       fairProb: Number(fairProb.toFixed(4)),
-      overround: Number(overround.toFixed(4))
+      overround: Number(overround.toFixed(4)),
+      method: 'POWER_FLB'
     };
   }
 
@@ -718,18 +765,57 @@ class QuantSignalEngine {
     const tMultA = flow?.pace?.tempoMultAway || 1.0;
 
     // xG Debt (Gol Borcu) Regression Boost (delta_lambda_xg_debt):
-    // Substantially strengthened for teams that earned high xG through inside-box/sot/big chances without scoring
+    // Substantially strengthened for teams that earned high xG through inside-box/sot/big chances without scoring.
+    // Weighted by recent shot velocity; decays exponentially (exp(-0.04 * deltaT_stale)) if shot production has stalled out.
     const xgDebtH = Number(Math.max(0, xgH - gH).toFixed(2));
     const xgDebtA = Number(Math.max(0, xgA - gA).toFixed(2));
     let debtBoostH = 0;
     let debtBoostA = 0;
 
+    const computeStaleMinutes = (teamCode, stats, d5, d10) => {
+      if (Array.isArray(match.shotmap) && match.shotmap.length > 0) {
+        const teamShots = match.shotmap.filter(s => {
+          const sTeam = String(s.team || '').toUpperCase();
+          return (sTeam === teamCode || (teamCode === 'HOME' ? s.isHome : s.isAway)) && s.minute != null && s.minute <= t;
+        });
+        if (teamShots.length > 0) {
+          const lastShotMin = Math.max(...teamShots.map(s => s.minute));
+          return Math.max(0, t - lastShotMin);
+        }
+        return t;
+      }
+      const s5 = d5.totalShots || 0;
+      const s10 = d10.totalShots || 0;
+      if (s5 >= 1) return Math.max(0, 5 - s5 * 1.5);
+      if (s10 >= 1) return Math.max(5, 10 - s10 * 2.0);
+      if (t >= 48 && flow?.half2Stats) {
+        const h2 = (teamCode === 'HOME' ? flow.half2Stats.home : flow.half2Stats.away) || {};
+        if ((h2.totalShots || 0) === 0) return 10 + Math.max(0, t - 45);
+      }
+      return Math.max(12, 10 + Math.max(0, t - 20) * 0.4);
+    };
+
+    const staleMinsH = computeStaleMinutes('HOME', hS, effD5H, effD10H);
+    const staleMinsA = computeStaleMinutes('AWAY', aS, effD5A, effD10A);
+
+    const shotVelH = (effD10H.totalShots || 0) / 10;
+    const shotVelA = (effD10A.totalShots || 0) / 10;
+    const avgVelH = (hS.totalShots || 0) / Math.max(10, t);
+    const avgVelA = (aS.totalShots || 0) / Math.max(10, t);
+    const velWeightH = this.clamp(0.25, 1.35, 0.40 + 0.60 * (shotVelH / Math.max(0.06, avgVelH)));
+    const velWeightA = this.clamp(0.25, 1.35, 0.40 + 0.60 * (shotVelA / Math.max(0.06, avgVelA)));
+
+    const staleDecayH = staleMinsH >= 12 ? Math.exp(-0.04 * staleMinsH) : 1.0;
+    const staleDecayA = staleMinsA >= 12 ? Math.exp(-0.04 * staleMinsA) : 1.0;
+
     if (!isScheduled && t >= 16 && t < 74) {
       if (xgDebtH >= 0.48 && (mH >= 1.02 || igpH >= 48 || (effD10H.shotsOnTarget || 0) >= 1 || (effD10H.corners || 0) >= 2)) {
-        debtBoostH = this.clamp(0, 0.48, 0.36 * (xgDebtH - 0.38) * remRatioFull * qPosH * Math.max(0.85, igpH / 50));
+        const rawBoostH = 0.36 * (xgDebtH - 0.38) * remRatioFull * qPosH * Math.max(0.85, igpH / 50);
+        debtBoostH = this.clamp(0, 0.48, rawBoostH * velWeightH * staleDecayH);
       }
       if (xgDebtA >= 0.48 && (mA >= 1.02 || igpA >= 48 || (effD10A.shotsOnTarget || 0) >= 1 || (effD10A.corners || 0) >= 2)) {
-        debtBoostA = this.clamp(0, 0.48, 0.36 * (xgDebtA - 0.38) * remRatioFull * qPosA * Math.max(0.85, igpA / 50));
+        const rawBoostA = 0.36 * (xgDebtA - 0.38) * remRatioFull * qPosA * Math.max(0.85, igpA / 50);
+        debtBoostA = this.clamp(0, 0.48, rawBoostA * velWeightA * staleDecayA);
       }
     }
 
@@ -825,15 +911,29 @@ class QuantSignalEngine {
     return 1.0;
   }
 
-  buildProbabilityMatrix(lambdaH, lambdaA, maxGoals = 7, rho = -0.10) {
+  /**
+   * Bivariate Poisson Probability Matrix with Dixon-Coles Low-Score Correlation:
+   * Conditioned strictly on FINAL match score (finalH = matchScoreH + x, finalA = matchScoreA + y).
+   * If finalH > 1 or finalA > 1, tau MUST be 1.0.
+   * Only when finalH <= 1 and finalA <= 1 apply tau(finalH, finalA, lambdaFullH, lambdaFullA, rho).
+   */
+  buildProbabilityMatrix(lambdaRemH, lambdaRemA, maxGoals = 7, rho = -0.10, matchScoreH = 0, matchScoreA = 0) {
     const matrix = [];
     let totalProb = 0;
+    const lambdaFullH = matchScoreH + lambdaRemH;
+    const lambdaFullA = matchScoreA + lambdaRemA;
+
     for (let x = 0; x <= maxGoals; x++) {
       matrix[x] = [];
-      const px = this.poissonPmf(x, lambdaH);
+      const px = this.poissonPmf(x, lambdaRemH);
       for (let y = 0; y <= maxGoals; y++) {
-        const py = this.poissonPmf(y, lambdaA);
-        const tau = this.dixonColesTau(x, y, lambdaH, lambdaA, rho);
+        const py = this.poissonPmf(y, lambdaRemA);
+        const finalH = matchScoreH + x;
+        const finalA = matchScoreA + y;
+        let tau = 1.0;
+        if (finalH <= 1 && finalA <= 1) {
+          tau = this.dixonColesTau(finalH, finalA, lambdaFullH, lambdaFullA, rho);
+        }
         const p = Math.max(0, px * py * tau);
         matrix[x][y] = p;
         totalProb += p;
@@ -937,22 +1037,26 @@ class QuantSignalEngine {
   /**
    * Classify Conviction Score (0-100) into Tier Badges
    */
-  classifySignalTier(convictionScore, edgePct) {
+  /**
+   * Classify Conviction Score (0-100) into Tier Badges:
+   * Requires genuine market odds before issuing quantitative +EV value signal tier badges.
+   */
+  classifySignalTier(convictionScore, edgePct, hasRealOdds = true) {
     if (convictionScore >= 82 && edgePct >= 6.5 && edgePct <= 28) {
       return {
         signalTier: 'ELITE_A_PLUS',
-        tierBadge: 'ELİT SİNYAL (A+)'
+        tierBadge: hasRealOdds ? 'ELİT SİNYAL (A+)' : 'ELİT MODEL (A+)'
       };
     }
     if (convictionScore >= 76 && edgePct >= 4.5) {
       return {
         signalTier: 'STRONG_A',
-        tierBadge: 'GÜÇLÜ SİNYAL (A)'
+        tierBadge: hasRealOdds ? 'GÜÇLÜ SİNYAL (A)' : 'GÜÇLÜ MODEL (A)'
       };
     }
     return {
-      signalTier: 'VALUE_B_PLUS',
-      tierBadge: 'DEĞER SİNYALİ (B+)'
+      signalTier: hasRealOdds ? 'VALUE_B_PLUS' : 'MODEL_B_PLUS',
+      tierBadge: hasRealOdds ? 'DEĞER SİNYALİ (B+)' : 'MODEL SİNYALİ (B+)'
     };
   }
 
@@ -1488,7 +1592,7 @@ class QuantSignalEngine {
       }
     }
 
-    const topTierBadge = selected[0].tierBadge || 'DEĞER SİNYALİ (B+)';
+    const topTierBadge = selected[0].tierBadge || (selected[0].hasRealOdds ? 'DEĞER SİNYALİ (B+)' : 'MODEL SİNYALİ (B+)');
     const htSuffix = match.status === 'HT' ? ' • 2. Yarı Hedefi' : '';
 
     return {
@@ -1526,14 +1630,14 @@ class QuantSignalEngine {
     }
     const htActiveLine = Math.min(1.5, gTot + 0.5);
 
-    // V5 Bivariate Poisson with Dixon-Coles Low-Score Correlation (rho = -0.10)
-    const matModel = this.buildProbabilityMatrix(lambdas.lambdaRemH, lambdas.lambdaRemA, 7, -0.10);
-    const matPrior = this.buildProbabilityMatrix(lambdas.priorRemH, lambdas.priorRemA, 7, -0.10);
+    // Bivariate Poisson with Dixon-Coles Low-Score Correlation (rho = -0.10) conditioned on current score
+    const matModel = this.buildProbabilityMatrix(lambdas.lambdaRemH, lambdas.lambdaRemA, 7, -0.10, gH, gA);
+    const matPrior = this.buildProbabilityMatrix(lambdas.priorRemH, lambdas.priorRemA, 7, -0.10, gH, gA);
     const matHtModel = (lambdas.isFirstHalfActive || isScheduled)
-      ? this.buildProbabilityMatrix(lambdas.lambdaHtH, lambdas.lambdaHtA, 5, -0.08)
+      ? this.buildProbabilityMatrix(lambdas.lambdaHtH, lambdas.lambdaHtA, 5, -0.08, gH, gA)
       : null;
     const matHtPrior = (lambdas.isFirstHalfActive || isScheduled)
-      ? this.buildProbabilityMatrix(lambdas.priorHtH, lambdas.priorHtA, 5, -0.08)
+      ? this.buildProbabilityMatrix(lambdas.priorHtH, lambdas.priorHtA, 5, -0.08, gH, gA)
       : null;
 
     const modelProbs = this.extractProbsFromMatrix(
@@ -1607,8 +1711,12 @@ class QuantSignalEngine {
         : Number(this.clamp(1.02, 65.00, calculatedLiveOdds).toFixed(2));
 
       // Institutional Expected Value (+EV) Calculation:
-      // EV% = (p_model * O_market - 1) * 100
-      const evPct = Number(((pMod * displayMarketOdds - 1) * 100).toFixed(1));
+      // When genuine live market odds are available, EV% = (p_model * O_market - 1) * 100
+      // When relying on synthetic odds, eliminate false/speculative +EV claims by setting evPct: null and isSyntheticOdds: true
+      const evPct = hasRealOdds
+        ? Number(((pMod * displayMarketOdds - 1) * 100).toFixed(1))
+        : null;
+      const isSyntheticOdds = !hasRealOdds;
 
       // Goalkeeper Resistance Index (GRI) Edge & Conviction Multipliers:
       let griEdgeBonus = 0;
@@ -1670,7 +1778,7 @@ class QuantSignalEngine {
 
       const convictionScore = allowed ? this.clamp(0, 99, rawConviction) : (isScheduled ? rawConviction : 0);
       const confidence = convictionScore;
-      const { signalTier, tierBadge } = this.classifySignalTier(convictionScore, edgePct);
+      const { signalTier, tierBadge } = this.classifySignalTier(convictionScore, edgePct, hasRealOdds);
 
       const urgency = (allowed && convictionScore >= 82 && hybridEdge >= 0.06)
         ? 'CRITICAL'
@@ -1689,6 +1797,7 @@ class QuantSignalEngine {
         fairOdds,
         marketOdds: displayMarketOdds,
         hasRealOdds,
+        isSyntheticOdds,
         oddsDropPct,
         confidence,
         convictionScore,
@@ -1697,7 +1806,7 @@ class QuantSignalEngine {
         allowedByState: allowed,
         urgency,
         isActiveWindow: isFirstHalfOnly ? lambdas.isFirstHalfActive : (match.status === 'LIVE' && minute < 75),
-        reasoning: reasonBuilder()
+        reasoning: typeof reasonBuilder === 'function' ? reasonBuilder(displayMarketOdds) : ''
       };
     };
 
@@ -1833,7 +1942,7 @@ class QuantSignalEngine {
           const timeCtx = isHt ? 'İlk yarıda' : 'Karşılaşmada';
           const totXgVal = ((hStats.xg || 0) + (aStats.xg || 0)).toFixed(2);
           if (gH === 1 && gA === 1 && minute >= 50) {
-            return `1-1 Kilit Kırılması & Tek Gol Hedefi: Dakika ${minute}' itibarıyla iki takım da ceza sahasına yükleniyor (${boxH + boxA} ceza sahası şutu, ${totCorners} korner, ${totXgVal} xG). Kazanması için sadece TEK BİR GOL gereken ${activeLine} Üst canlıda en yüksek beklenen değerli (EV) fırsattır (Hedef: ${activeLine} Üst / %${Math.round(modelProbs.overProb * 100)} Model Olasılığı).`;
+            return `1-1 Kilit Kırılması & Tek Gol Hedefi: Dakika ${minute}' itibarıyla iki takım da ceza sahasına yükleniyor (${boxH + boxA} ceza sahası şutu, ${totCorners} korner, ${totXgVal} xG). Kazanması için sadece TEK BİR GOL gereken ${activeLine} Üst fırsatında gol beklentisi doygunluğa ulaştı (Hedef: ${activeLine} Üst / %${Math.round(modelProbs.overProb * 100)} Model Olasılığı).`;
           }
           return `Gol Doygunluğu & Hücum Kuşatması: ${timeCtx} toplam ${totShots} şut (${totSot} isabet, ${boxH + boxA} ceza sahası içi) ve ${totCorners} korner ile ${totXgVal} xG birikti. Savunma dirençleri kırılma noktasında; ${activeLine} Üst beklentisi kaçınılmaz (Hedef: ${activeLine} Üst / %${Math.round(modelProbs.overProb * 100)} Güven).`;
         }
@@ -1917,12 +2026,12 @@ class QuantSignalEngine {
         relMomentum: lambdas.momentumH * lambdas.burst5H, relIgp: flow.igpHome,
         relQuality: lambdas.qPosH, relXgDebt: lambdas.xgDebtH,
         relGri: lambdas.griA, relPce: lambdas.pceH, relHlov: lambdas.hlovA,
-        reasonBuilder: () => {
+        reasonBuilder: (displayMarketOdds) => {
           const isHt = match.status === 'HT';
           const timeCtx = isHt ? 'ilk yarıda ceza sahası içinden' : 'son 10 dakikada';
           const xgVal = (hStats.xg || 0).toFixed(2);
           const shotCtx = isHt ? `${boxH} şut bularak ${xgVal} xG üretti (${hStats.shotsOnTarget || 0} isabet)` : `${d10ShotsH} şut ve ${d10CorH} kornerle rakip kaleyi ablukaya aldı`;
-          return `Ceza Sahası Kuşatması: ${match.home.name} ${timeCtx} ${shotCtx}. Deplasman savunması geriye yaslandı; 2. yarıda ${nextGoalNum}. gol baskısı kaçınılmaz (Hedef: Sıradaki Gol Ev @${(1 / (1.03 * (modelProbs.nextGoalHome || 0.6))).toFixed(2)} / %${Math.round(modelProbs.nextGoalHome * 100)} Güven).`;
+          return `Ceza Sahası Kuşatması: ${match.home.name} ${timeCtx} ${shotCtx}. Deplasman savunması geriye yaslandı; 2. yarıda ${nextGoalNum}. gol baskısı kaçınılmaz (Hedef: Sıradaki Gol Ev @${displayMarketOdds} / %${Math.round(modelProbs.nextGoalHome * 100)} Güven).`;
         }
       }),
       evaluateOption({
@@ -1999,7 +2108,9 @@ class QuantSignalEngine {
             prob: (o.modelProbPct || 0) / 100,
             odds: o.marketOdds,
             fairOdds: o.fairOdds,
-            evPct: o.evPct
+            evPct: o.hasRealOdds ? o.evPct : null,
+            hasRealOdds: Boolean(o.hasRealOdds),
+            isSyntheticOdds: Boolean(o.isSyntheticOdds)
           }))
         };
       }
@@ -2059,7 +2170,9 @@ class QuantSignalEngine {
           prob: (o.modelProbPct || 0) / 100,
           odds: o.marketOdds,
           fairOdds: o.fairOdds,
-          evPct: o.evPct,
+          evPct: o.hasRealOdds ? o.evPct : null,
+          hasRealOdds: Boolean(o.hasRealOdds),
+          isSyntheticOdds: Boolean(o.isSyntheticOdds),
           allowed: Boolean(o.allowedByState) && !isClosed
         }))
       };

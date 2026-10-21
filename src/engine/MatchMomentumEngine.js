@@ -317,41 +317,50 @@ class MatchMomentumEngine {
 
   /**
    * Possession Quality & Pass Control Efficiency (PCE):
-   * Incorporates passAccuracy and passesCompleted vs dangerousAttacks:
-   * Distinguishes sterile back-line possession from vertical progressive siege.
+   * Incorporates passAccuracy, passesCompleted vs dangerousAttacks, and UEFA-Pro Field Tilt:
+   * Field Tilt = (dangerousAttacks_team / Math.max(1, dangerousAttacks_H + dangerousAttacks_A)) * 100
+   * Distinguishes sterile back-line circulation from vertical progressive siege.
    */
   computePassControlEfficiency(stats = {}, oppStats = {}, minute = 1) {
     const t = Math.max(10, minute || 1);
     const possession = stats.possession || 50;
     const da = stats.dangerousAttacks || 0;
+    const oppDa = oppStats.dangerousAttacks || 0;
     const att = stats.attacks || Math.round(da * 1.6);
     const box = stats.shotsInsideBox != null ? stats.shotsInsideBox : Math.round(0.62 * (stats.shotsOnTarget || 0) + 0.35 * (stats.corners || 0));
     const passesCompleted = stats.passesCompleted || stats.passesAccurate || Math.round((possession / 100) * Math.min(90, t) * 9.2);
     const passAccuracy = stats.passAccuracy || (possession >= 55 ? 82 : (possession <= 45 ? 74 : 78));
 
+    // Field Tilt & Progressive Penetration (UEFA-Pro Metric):
+    // Territorial dominance in final third: share of dangerous attacks relative to match total
+    const fieldTilt = Number(((da / Math.max(1, da + oppDa)) * 100).toFixed(1));
+
     const daConversion = att > 0 ? (da / att) : 0.45;
     const daRate = da / t;
     const passesPerDa = da > 0 ? (passesCompleted / da) : 25;
 
-    // Distinguish sterile possession from vertical progressive siege
+    // Distinguish sterile back-line circulation from vertical progressive siege using Field Tilt & Pass Control Efficiency
     const isSterilePossession = (possession >= 54 && passAccuracy >= 79) &&
-      (daConversion < 0.40 || daRate < 0.35 || passesPerDa > 18.0) &&
+      (fieldTilt < 45 || daConversion < 0.40 || daRate < 0.35 || passesPerDa > 18.0) &&
       (box <= 2);
 
-    const isProgressiveSiege = (daConversion >= 0.52 || daRate >= 0.55 || (box >= 4 && daRate >= 0.42)) &&
-      (passesPerDa <= 12.0 || da >= 25);
+    const isProgressiveSiege = (fieldTilt >= 55 || daConversion >= 0.52 || daRate >= 0.55 || (box >= 4 && daRate >= 0.42)) &&
+      (passesPerDa <= 13.0 || da >= 25 || fieldTilt >= 62);
 
     let pce = 1.0;
     let regime = 'BALANCED_POSSESSION';
 
     if (isSterilePossession) {
-      pce = this.clamp(0.72, 0.88, 0.80 * (daConversion / 0.44));
+      const tiltDamp = Math.min(1.0, fieldTilt / 50);
+      pce = this.clamp(0.70, 0.88, 0.80 * (daConversion / 0.44) * tiltDamp);
       regime = 'STERILE_POSSESSION';
     } else if (isProgressiveSiege) {
-      pce = this.clamp(1.12, 1.38, 1.0 + 0.22 * (daRate / 0.50) + 0.05 * Math.min(3, box / 2));
+      const tiltBoost = Math.max(1.0, fieldTilt / 50);
+      pce = this.clamp(1.12, 1.42, (1.0 + 0.20 * (daRate / 0.50) + 0.05 * Math.min(3, box / 2)) * Math.min(1.15, tiltBoost));
       regime = 'VERTICAL_PROGRESSIVE_SIEGE';
     } else {
-      pce = this.clamp(0.88, 1.10, 0.90 + 0.20 * (daConversion / 0.48));
+      const tiltFactor = this.clamp(0.92, 1.08, fieldTilt / 50);
+      pce = this.clamp(0.88, 1.12, (0.90 + 0.20 * (daConversion / 0.48)) * tiltFactor);
       regime = 'BALANCED_POSSESSION';
     }
 
@@ -359,6 +368,7 @@ class MatchMomentumEngine {
       pce: Number(pce.toFixed(3)),
       regime,
       possession,
+      fieldTilt,
       passAccuracy,
       passesCompleted,
       daConversion: Number((daConversion * 100).toFixed(1)),
@@ -1746,6 +1756,22 @@ class MatchMomentumEngine {
       });
     }
 
+    // UEFA-Pro Field Tilt Territorial Penetration Factor
+    const fieldTiltH = pce?.home?.fieldTilt ?? 50;
+    const fieldTiltA = pce?.away?.fieldTilt ?? 50;
+    const maxTilt = Math.max(fieldTiltH, fieldTiltA);
+    const tiltTeam = fieldTiltH >= 62 ? match.home?.name : (fieldTiltA >= 62 ? match.away?.name : null);
+    if (tiltTeam && maxTilt >= 62 && factors.length < 5) {
+      factors.push({
+        key: 'FIELD_TILT_DOMINANCE',
+        title: 'Bölgesel Hakimiyet (Field Tilt)',
+        badge: `%${Math.round(maxTilt)} Saha Eğilimi`,
+        summary: `${tiltTeam} rakip yarı sahaya yerleşerek %${Math.round(maxTilt)} saha eğilimi (Field Tilt) kurdu; tehlikeli hücum üstünlüğüyle savunma bloğunu derine itti.`,
+        score: Math.round(maxTilt),
+        tone: 'emerald'
+      });
+    }
+
     // Strictly enforce at least 3, at most 5 evidence factors
     if (factors.length > 5) {
       return factors.slice(0, 5);
@@ -1819,9 +1845,11 @@ class MatchMomentumEngine {
     const griHome = this.computeGoalkeeperResistanceIndex(hStats, aStats, match.home?.score || 0, match.away?.score || 0, d5.home, d10.home);
     const griAway = this.computeGoalkeeperResistanceIndex(aStats, hStats, match.away?.score || 0, match.home?.score || 0, d5.away, d10.away);
 
-    // Possession Quality & Pass Control Efficiency (PCE)
+    // Possession Quality & Pass Control Efficiency (PCE) incorporating Field Tilt
     const pceHome = this.computePassControlEfficiency(hStats, aStats, minute);
     const pceAway = this.computePassControlEfficiency(aStats, hStats, minute);
+    const fieldTiltHome = pceHome.fieldTilt;
+    const fieldTiltAway = pceAway.fieldTilt;
 
     // High Defensive Line & Offside Trap Vulnerability (HLOV)
     const hlovHome = this.computeHighLineOffsideVulnerability(hStats, aStats, minute, d10.home);
@@ -1886,6 +1914,8 @@ class MatchMomentumEngine {
       griAway,
       pceHome,
       pceAway,
+      fieldTiltHome,
+      fieldTiltAway,
       hlovHome,
       hlovAway,
       hasHalf2Data: periodInfo.hasHalf2Data,

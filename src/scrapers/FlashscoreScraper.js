@@ -19,10 +19,32 @@ class FlashscoreScraper {
     this.uaIndex = 0;
     this.timeoutMs = 4500;
     this.maxRetries = 2;
+
+    this.primaryToken = 'SW9D1eZo';
+    this.currentToken = this.primaryToken;
+    this.tokenFallbackList = [
+      'SW9D1eZo',
+      'SW9D1eZp',
+      '46c4b5c2',
+      'a1b2c3d4',
+      'd3b07384d113edec49eaa6238ad5ff00'
+    ];
+    this.fallbackIndex = 0;
+    this.lastTokenRefreshTs = 0;
+    this.tokenRefreshPromise = null;
+
+    this.originList = [
+      'https://www.flashscore.com.tr',
+      'https://www.flashscore.com',
+      'https://www.flashscore.co.uk',
+      'https://www.flashscore.mobi'
+    ];
+    this.originIndex = 0;
+
     this.headers = {
-      'x-fsign': 'SW9D1eZo',
-      'Referer': 'https://www.flashscore.com.tr/',
-      'Origin': 'https://www.flashscore.com.tr',
+      'x-fsign': this.currentToken,
+      'Referer': `${this.originList[0]}/`,
+      'Origin': this.originList[0],
       'Accept': '*/*',
       'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
       'Accept-Encoding': 'gzip, deflate',
@@ -37,12 +59,92 @@ class FlashscoreScraper {
     return ua;
   }
 
+  getNextOrigin() {
+    const origin = this.originList[this.originIndex % this.originList.length];
+    this.originIndex = (this.originIndex + 1) % this.originList.length;
+    return origin;
+  }
+
+  /**
+   * Dynamic token discovery: attempts to scrape latest x-fsign token from web client,
+   * falling back to secondary signature rotations upon failure or HTTP 403.
+   */
+  async refreshDynamicToken() {
+    if (this.tokenRefreshPromise) return this.tokenRefreshPromise;
+
+    this.tokenRefreshPromise = (async () => {
+      const now = Date.now();
+      // Throttle discovery requests to at most once every 30 seconds
+      if (now - this.lastTokenRefreshTs < 30000) {
+        this.rotateFallbackToken();
+        return this.currentToken;
+      }
+      this.lastTokenRefreshTs = now;
+
+      const endpoints = [
+        'https://www.flashscore.com.tr/',
+        'https://www.flashscore.com/',
+        'https://www.flashscore.mobi/'
+      ];
+
+      for (const endpoint of endpoints) {
+        try {
+          const res = await fetch(endpoint, {
+            headers: {
+              'User-Agent': this.getNextUserAgent(),
+              'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+              'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7'
+            },
+            signal: AbortSignal.timeout(3500)
+          });
+          if (res.ok) {
+            const html = await res.text();
+            const match =
+              html.match(/["']?x-fsign["']?\s*[:=]\s*["']([A-Za-z0-9_\-]{6,40})["']/i) ||
+              html.match(/["']?fsign["']?\s*[:=]\s*["']([A-Za-z0-9_\-]{6,40})["']/i) ||
+              html.match(/x-fsign["']?\s*:\s*["']([^"']+)["']/i);
+
+            if (match && match[1]) {
+              const discoveredToken = match[1].trim();
+              if (discoveredToken && discoveredToken.length >= 6) {
+                this.currentToken = discoveredToken;
+                this.headers['x-fsign'] = this.currentToken;
+                if (!this.tokenFallbackList.includes(discoveredToken)) {
+                  this.tokenFallbackList.unshift(discoveredToken);
+                }
+                return this.currentToken;
+              }
+            }
+          }
+        } catch (_) {}
+      }
+
+      // If dynamic extraction yielded no new token, rotate to next verified fallback token
+      this.rotateFallbackToken();
+      return this.currentToken;
+    })().finally(() => {
+      this.tokenRefreshPromise = null;
+    });
+
+    return this.tokenRefreshPromise;
+  }
+
+  rotateFallbackToken() {
+    this.fallbackIndex = (this.fallbackIndex + 1) % this.tokenFallbackList.length;
+    this.currentToken = this.tokenFallbackList[this.fallbackIndex];
+    this.headers['x-fsign'] = this.currentToken;
+    const origin = this.getNextOrigin();
+    this.headers['Origin'] = origin;
+    this.headers['Referer'] = `${origin}/`;
+  }
+
   async fetchWithRetry(url, customHeaders = {}, maxRetries = this.maxRetries, timeoutMs = this.timeoutMs) {
     let lastError = null;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         const headers = {
           ...this.headers,
+          'x-fsign': this.currentToken,
           ...customHeaders,
           'User-Agent': this.getNextUserAgent(),
           'Accept-Encoding': 'gzip, deflate'
@@ -51,6 +153,11 @@ class FlashscoreScraper {
           headers,
           signal: AbortSignal.timeout(timeoutMs)
         });
+        if (res.status === 403 || res.status === 401) {
+          // Token rejected upstream: trigger dynamic token refresh & header rotation
+          await this.refreshDynamicToken();
+          throw new Error(`HTTP ${res.status} Forbidden (Signature Token Expired or Rejected)`);
+        }
         if (!res.ok) {
           throw new Error(`HTTP ${res.status} ${res.statusText}`);
         }

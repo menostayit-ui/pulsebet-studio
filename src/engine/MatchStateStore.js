@@ -133,6 +133,17 @@ class MatchStateStore {
     const last = list[list.length - 1];
     const hS = match.home.stats || {};
     const aS = match.away.stats || {};
+
+    // During HT, avoid pushing repetitive duplicate snapshots every 15s if stats have not changed
+    if (match.status === 'HT' && last && last.minute === 45) {
+      const statsUnchanged =
+        last.homeStats.totalShots === hS.totalShots &&
+        last.awayStats.totalShots === aS.totalShots &&
+        last.homeStats.fouls === hS.fouls &&
+        last.awayStats.fouls === aS.fouls;
+      if (statsUnchanged) return;
+    }
+
     const shouldPush = !last ||
       (now - last.ts >= 15000) ||
       (last.homeStats.totalShots !== hS.totalShots) ||
@@ -148,7 +159,7 @@ class MatchStateStore {
         awayStats: { ...aS },
         odds: match.odds ? { ...match.odds } : null
       });
-      if (list.length > 40) list.shift();
+      if (list.length > 80) list.shift();
     }
   }
 
@@ -156,30 +167,61 @@ class MatchStateStore {
     const id = match.matchId;
     const list = this.snapshots.get(id) || [];
     const now = Date.now();
-    const minNow = Math.max(5, match.minute || 1);
+    const currMin = Math.max(1, match.minute || 1);
+    const minNow = Math.max(5, currMin);
 
     const hNow = match.home.stats || {};
     const aNow = match.away.stats || {};
 
-    const snap5 = list.find(s => (now - s.ts) <= 330000 && (now - s.ts) >= 100000) || list[0];
-    const snap10 = list.find(s => (now - s.ts) <= 660000 && (now - s.ts) >= 240000) || list[0];
+    // Match minute window selector: finds snapshot closest to target match minute delta
+    const findSnapForWindow = (targetWindow) => {
+      if (!list || list.length === 0) return null;
+      let bestSnap = list[0];
+      let minDiff = Infinity;
+      for (const s of list) {
+        const delta = Math.max(0, currMin - (s.minute || 1));
+        const diff = Math.abs(delta - targetWindow);
+        if (diff < minDiff) {
+          minDiff = diff;
+          bestSnap = s;
+        }
+      }
+      return bestSnap;
+    };
 
-    const diffStats = (curr, prev, windowMins) => {
-      const elapsedRealMins = prev ? Math.max(0.5, (now - prev.ts) / 60000) : 0;
-      const keys = ['totalShots', 'shotsOnTarget', 'shotsOffTarget', 'blockedShots', 'shotsInsideBox', 'bigChances', 'woodwork', 'corners', 'fouls', 'yellowCards', 'redCards', 'dangerousAttacks', 'saves', 'offsides', 'touchesInBox', 'xg'];
+    const snap5 = findSnapForWindow(5);
+    const snap10 = findSnapForWindow(10);
+
+    const diffStats = (curr, prevStats, prevSnap, windowMins) => {
+      const prevMin = prevSnap ? (prevSnap.minute || 1) : currMin;
+      const matchMinDelta = Math.max(0, currMin - prevMin);
+
+      // Official Match Minute Delta: eliminate the 15-minute halftime wall-clock gap.
+      // If matchMinDelta >= 1, use official match minutes directly.
+      // For intra-minute resolution (matchMinDelta === 0), use bounded sub-minute fraction (0.5 to 1.0).
+      const elapsedMatchMins = prevSnap
+        ? (matchMinDelta >= 1 ? matchMinDelta : Math.min(1.0, Math.max(0.5, (now - prevSnap.ts) / 60000)))
+        : 0;
+
+      const keys = [
+        'totalShots', 'shotsOnTarget', 'shotsOffTarget', 'blockedShots',
+        'shotsInsideBox', 'bigChances', 'woodwork', 'corners', 'fouls',
+        'yellowCards', 'redCards', 'dangerousAttacks', 'saves', 'offsides',
+        'touchesInBox', 'xg'
+      ];
       const out = {};
 
       for (const k of keys) {
         const cVal = curr[k] || 0;
-        if (prev && elapsedRealMins >= 1.5) {
-          const rawDelta = Math.max(0, cVal - (prev[k] || 0));
-          const scaled = rawDelta * (windowMins / Math.max(windowMins, elapsedRealMins));
+        if (prevStats && elapsedMatchMins >= 1.0) {
+          const rawDelta = Math.max(0, cVal - (prevStats[k] || 0));
+          const scaled = rawDelta * (windowMins / Math.max(windowMins, elapsedMatchMins));
           // Partially observed window: blend observed delta with match-average pace for the unobserved remainder
-          const unobservedShare = Math.max(0, 1 - elapsedRealMins / windowMins);
+          const unobservedShare = Math.max(0, 1 - elapsedMatchMins / windowMins);
           const rateEst = (cVal / minNow) * windowMins;
           out[k] = Number((scaled + rateEst * unobservedShare).toFixed(2));
         } else {
-          const immediateDelta = prev ? Math.max(0, cVal - (prev[k] || 0)) : 0;
+          const immediateDelta = prevStats ? Math.max(0, cVal - (prevStats[k] || 0)) : 0;
           const rateEst = (cVal / minNow) * windowMins;
           out[k] = Number(Math.max(immediateDelta, rateEst).toFixed(2));
         }
@@ -189,12 +231,12 @@ class MatchStateStore {
 
     return {
       delta5: {
-        home: diffStats(hNow, snap5?.homeStats, 5),
-        away: diffStats(aNow, snap5?.awayStats, 5)
+        home: diffStats(hNow, snap5?.homeStats, snap5, 5),
+        away: diffStats(aNow, snap5?.awayStats, snap5, 5)
       },
       delta10: {
-        home: diffStats(hNow, snap10?.homeStats, 10),
-        away: diffStats(aNow, snap10?.awayStats, 10)
+        home: diffStats(hNow, snap10?.homeStats, snap10, 10),
+        away: diffStats(aNow, snap10?.awayStats, snap10, 10)
       }
     };
   }

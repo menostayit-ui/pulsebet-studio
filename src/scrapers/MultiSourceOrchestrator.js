@@ -29,12 +29,19 @@ class MultiSourceOrchestrator {
     this.linkCache = new Map(); // sourceKey -> canonicalMatchId
     this.deepRoundRobinIdx = 0;
     this.isRunning = false;
+    this.commitQueue = Promise.resolve();
 
     this.sourceStatus = {
       flashscore: { active: false, lastSync: null, matchCount: 0, latencyMs: 0 },
       scores365: { active: false, lastSync: null, matchCount: 0, latencyMs: 0 },
       espn: { active: false, lastSync: null, matchCount: 0, latencyMs: 0 }
     };
+  }
+
+  enqueueCommit(task) {
+    const next = this.commitQueue.then(() => task(), () => task());
+    this.commitQueue = next.catch(() => {});
+    return next;
   }
 
   getLeaguePrestigeScore(leagueName) {
@@ -667,156 +674,159 @@ class MultiSourceOrchestrator {
   /**
    * Run full tactical, player & selective quantitative analysis on a match,
    * settle any active signals in real time, and remove finished (FT) matches immediately.
+   * Execution is sequentially synchronized via commitQueue mutex to eliminate race conditions.
    */
   evaluateAndCommitMatch(prevSnapshot, match) {
-    this.normalizeShotConsistency(match);
+    return this.enqueueCommit(() => {
+      this.normalizeShotConsistency(match);
 
-    // 1. If match finished (FT) or was postponed, settle its signals and DELETE it from store.matches immediately!
-    if (match.status === 'FT' || match.status === 'POSTPONED') {
-      this.store.removeFinishedMatch(match.matchId, match);
-      this.diffEngine.seedBaselineSilently(match);
-      return { detectedEvents: [], detectedSignals: [] };
-    }
+      // 1. If match finished (FT) or was postponed, settle its signals and DELETE it from store.matches immediately!
+      if (match.status === 'FT' || match.status === 'POSTPONED') {
+        this.store.removeFinishedMatch(match.matchId, match);
+        this.diffEngine.seedBaselineSilently(match);
+        return { detectedEvents: [], detectedSignals: [] };
+      }
 
-    this.store.recordSnapshot(match);
+      this.store.recordSnapshot(match);
 
-    const windows = this.store.getSlidingWindows(match);
-    const flow = this.momentumEngine.analyzeMatchFlow(match, windows);
-    const players = this.playerEngine.analyzePlayers(match);
-    const quant = this.quantEngine.analyzeMarkets(match, windows, flow, players);
+      const windows = this.store.getSlidingWindows(match);
+      const flow = this.momentumEngine.analyzeMatchFlow(match, windows);
+      const players = this.playerEngine.analyzePlayers(match);
+      const quant = this.quantEngine.analyzeMarkets(match, windows, flow, players);
 
-    match.analysis = {
-      flow,
-      players,
-      quant
-    };
-    match.updatedAt = Date.now();
-
-    // 2. Always settle any tracked signals for this match in real time (e.g. instant Over / BTTS / Next Goal wins!)
-    this.store.settleSignalsForMatch(match);
-
-    // 3. If match reached late-game cutoff (>= 88'), purge live event notifications
-    if ((match.minute || 0) >= 88) {
-      this.store.pruneMatchNotifications(match.matchId, false);
-      this.diffEngine.seedBaselineSilently(match);
-      this.store.matches.set(match.matchId, match);
-      return { detectedEvents: [], detectedSignals: [] };
-    }
-
-    const detectedEvents = this.diffEngine.diff(prevSnapshot, match);
-    const detectedSignals = [];
-
-    // 4. SELECTIVE SIGNAL HUNTER: Strictly emit only when LIVE (10 <= minute < 75) or HT, and SIGNAL_TRIGGERED
-    const min = match.minute || 0;
-    const isLiveOrHt = (match.status === 'LIVE' && min >= 10 && min < 75) || match.status === 'HT';
-    if (
-      isLiveOrHt &&
-      quant.signalStatus === 'SIGNAL_TRIGGERED' &&
-      quant.primarySignal
-    ) {
-      // =========================================================================
-      // SIGNAL SAFETY GATEKEEPER:
-      // 1-1 skorunda olan veya skoru ne olursa olsun, kazanması için 2+ gol gereken
-      // bir "Üst" (Over) sinyalinin asla detectedSignals dizisine girmesine İZİN VERME!
-      // Eğer bir sinyal selection.includes('Üst') içeriyorsa ve o anki toplam skordan
-      // 2 veya daha fazla gol gerektiriyorsa (örn: skor 1-1 iken 3.5 Üst, skor 2-1 iken 4.5 Üst),
-      // bu sinyali filtrele ve düşür!
-      // =========================================================================
-      const isOverUnsafe = (sig) => {
-        if (!sig) return true;
-        const sel = String(sig.selection || '');
-        if (!sel.includes('Üst')) return false;
-
-        const gH = Number(match.home?.score || 0);
-        const gA = Number(match.away?.score || 0);
-        const currentGoals = gH + gA;
-
-        let line = sig.line;
-        if (line === undefined || line === null || isNaN(line)) {
-          const matchLine = sel.match(/(\d+\.?\d*)\s*Üst/i) || sel.match(/(\d+\.?\d*)/);
-          line = matchLine ? parseFloat(matchLine[1]) : 2.5;
-        }
-
-        const isHtOu = sig.marketKey === 'HT_OU' || sel.includes('İY');
-        const effectiveScore = isHtOu
-          ? ((match.status === 'LIVE' && min <= 45) ? currentGoals : (Number(match.home?.htScore || 0) + Number(match.away?.htScore || 0)))
-          : currentGoals;
-
-        const goalsRequiredToWin = Math.floor(line) + 1;
-        const goalsNeeded = goalsRequiredToWin - effectiveScore;
-
-        return goalsNeeded >= 2;
+      match.analysis = {
+        flow,
+        players,
+        quant
       };
+      match.updatedAt = Date.now();
 
-      let targetSig = quant.primarySignal;
-      if (isOverUnsafe(targetSig)) {
-        if (quant.complementarySignal && !isOverUnsafe(quant.complementarySignal)) {
-          targetSig = quant.complementarySignal;
-        } else {
-          targetSig = null; // Filtrele ve düşür!
-        }
+      // 2. Always settle any tracked signals for this match in real time (e.g. instant Over / BTTS / Next Goal wins!)
+      this.store.settleSignalsForMatch(match);
+
+      // 3. If match reached late-game cutoff (>= 88'), purge live event notifications
+      if ((match.minute || 0) >= 88) {
+        this.store.pruneMatchNotifications(match.matchId, false);
+        this.diffEngine.seedBaselineSilently(match);
+        this.store.matches.set(match.matchId, match);
+        return { detectedEvents: [], detectedSignals: [] };
       }
 
-      if (targetSig) {
-        const topSig = targetSig;
-        const sigFp = `${match.matchId}:sig:${topSig.marketKey}:${topSig.selection}`;
+      const detectedEvents = this.diffEngine.diff(prevSnapshot, match);
+      const detectedSignals = [];
 
-        // Quality guards: market-based cooldown, no stacking on the same market while one is pending, max 4 per match
-        const matchSignals = (this.store.signalLedger || []).filter(r => r.matchId === match.matchId);
-        // Market-based cooldown: 5min for same market, 2.5min for different market
-        const inCooldown = matchSignals.some(r => {
-          const elapsed = Date.now() - (r.timestamp || 0);
-          if (r.marketKey === topSig.marketKey) return elapsed < 5 * 60 * 1000;   // same market: 5min
-          return elapsed < 2.5 * 60 * 1000;                                        // different market: 2.5min
-        });
-        const marketBusy = matchSignals.some(r => r.settlementStatus === 'PENDING' && r.marketKey === topSig.marketKey);
-        const overLimit = matchSignals.length >= 4;
-        // Warm-up: signal after 1 full deep-stat refresh (was 2), _statsHydrated still required
-        const warmedUp = Boolean(match._statsHydrated) && (match._deepCount || 0) >= 1;
+      // 4. SELECTIVE SIGNAL HUNTER: Strictly emit only when LIVE (10 <= minute < 75) or HT, and SIGNAL_TRIGGERED
+      const min = match.minute || 0;
+      const isLiveOrHt = (match.status === 'LIVE' && min >= 10 && min < 75) || match.status === 'HT';
+      if (
+        isLiveOrHt &&
+        quant.signalStatus === 'SIGNAL_TRIGGERED' &&
+        quant.primarySignal
+      ) {
+        // =========================================================================
+        // SIGNAL SAFETY GATEKEEPER:
+        // 1-1 skorunda olan veya skoru ne olursa olsun, kazanması için 2+ gol gereken
+        // bir "Üst" (Over) sinyalinin asla detectedSignals dizisine girmesine İZİN VERME!
+        // Eğer bir sinyal selection.includes('Üst') içeriyorsa ve o anki toplam skordan
+        // 2 veya daha fazla gol gerektiriyorsa (örn: skor 1-1 iken 3.5 Üst, skor 2-1 iken 4.5 Üst),
+        // bu sinyali filtrele ve düşür!
+        // =========================================================================
+        const isOverUnsafe = (sig) => {
+          if (!sig) return true;
+          const sel = String(sig.selection || '');
+          if (!sel.includes('Üst')) return false;
 
-        if (warmedUp && !inCooldown && !marketBusy && !overLimit && !this.store.hasSignalFingerprint(sigFp)) {
-          detectedSignals.push({
-            id: `sig_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-            timestamp: Date.now(),
-            type: 'BETTING_SIGNAL',
-            category: 'signal',
-            minute: min,
-            minuteLabel: `${min}'`,
-            matchId: match.matchId,
-            leagueName: match.league?.name || 'Lig',
-            homeName: match.home.name,
-            awayName: match.away.name,
-            homeLogo: match.home.logo || null,
-            awayLogo: match.away.logo || null,
-            homeBackupLogo: match.home.backupLogo || null,
-            awayBackupLogo: match.away.backupLogo || null,
-            homeScore: match.home.score,
-            awayScore: match.away.score,
-            shotSummary: this.diffEngine.buildShotSummary(match),
-            archetypeLabel: topSig.archetypeLabel || flow.archetypeLabel || 'Gidişat Sinyali',
-            narrative: flow.narrative || topSig.reasoning,
-            signalTier: topSig.signalTier || 'VALUE_B_PLUS',
-            tierBadge: topSig.tierBadge || 'DEĞER SİNYALİ (B+)',
-            convictionScore: topSig.convictionScore || topSig.confidence,
-            evidenceFactors: flow.evidenceFactors || [],
-            signal: topSig,
-            complementarySignal: (targetSig === quant.primarySignal ? quant.complementarySignal : null),
-            title: `${topSig.selection} (%${topSig.confidence} Güven)`,
-            message: topSig.reasoning
+          const gH = Number(match.home?.score || 0);
+          const gA = Number(match.away?.score || 0);
+          const currentGoals = gH + gA;
+
+          let line = sig.line;
+          if (line === undefined || line === null || isNaN(line)) {
+            const matchLine = sel.match(/(\d+\.?\d*)\s*Üst/i) || sel.match(/(\d+\.?\d*)/);
+            line = matchLine ? parseFloat(matchLine[1]) : 2.5;
+          }
+
+          const isHtOu = sig.marketKey === 'HT_OU' || sel.includes('İY');
+          const effectiveScore = isHtOu
+            ? ((match.status === 'LIVE' && min <= 45) ? currentGoals : (Number(match.home?.htScore || 0) + Number(match.away?.htScore || 0)))
+            : currentGoals;
+
+          const goalsRequiredToWin = Math.floor(line) + 1;
+          const goalsNeeded = goalsRequiredToWin - effectiveScore;
+
+          return goalsNeeded >= 2;
+        };
+
+        let targetSig = quant.primarySignal;
+        if (isOverUnsafe(targetSig)) {
+          if (quant.complementarySignal && !isOverUnsafe(quant.complementarySignal)) {
+            targetSig = quant.complementarySignal;
+          } else {
+            targetSig = null; // Filtrele ve düşür!
+          }
+        }
+
+        if (targetSig) {
+          const topSig = targetSig;
+          const sigFp = `${match.matchId}:sig:${topSig.marketKey}:${topSig.selection}`;
+
+          // Quality guards: market-based cooldown, no stacking on the same market while one is pending, max 4 per match
+          const matchSignals = (this.store.signalLedger || []).filter(r => r.matchId === match.matchId);
+          // Market-based cooldown: 5min for same market, 2.5min for different market
+          const inCooldown = matchSignals.some(r => {
+            const elapsed = Date.now() - (r.timestamp || 0);
+            if (r.marketKey === topSig.marketKey) return elapsed < 5 * 60 * 1000;   // same market: 5min
+            return elapsed < 2.5 * 60 * 1000;                                        // different market: 2.5min
           });
+          const marketBusy = matchSignals.some(r => r.settlementStatus === 'PENDING' && r.marketKey === topSig.marketKey);
+          const overLimit = matchSignals.length >= 4;
+          // Warm-up: signal after 1 full deep-stat refresh (was 2), _statsHydrated still required
+          const warmedUp = Boolean(match._statsHydrated) && (match._deepCount || 0) >= 1;
+
+          if (warmedUp && !inCooldown && !marketBusy && !overLimit && !this.store.hasSignalFingerprint(sigFp)) {
+            detectedSignals.push({
+              id: `sig_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+              timestamp: Date.now(),
+              type: 'BETTING_SIGNAL',
+              category: 'signal',
+              minute: min,
+              minuteLabel: `${min}'`,
+              matchId: match.matchId,
+              leagueName: match.league?.name || 'Lig',
+              homeName: match.home.name,
+              awayName: match.away.name,
+              homeLogo: match.home.logo || null,
+              awayLogo: match.away.logo || null,
+              homeBackupLogo: match.home.backupLogo || null,
+              awayBackupLogo: match.away.backupLogo || null,
+              homeScore: match.home.score,
+              awayScore: match.away.score,
+              shotSummary: this.diffEngine.buildShotSummary(match),
+              archetypeLabel: topSig.archetypeLabel || flow.archetypeLabel || 'Gidişat Sinyali',
+              narrative: flow.narrative || topSig.reasoning,
+              signalTier: topSig.signalTier || 'VALUE_B_PLUS',
+              tierBadge: topSig.tierBadge || 'DEĞER SİNYALİ (B+)',
+              convictionScore: topSig.convictionScore || topSig.confidence,
+              evidenceFactors: flow.evidenceFactors || [],
+              signal: topSig,
+              complementarySignal: (targetSig === quant.primarySignal ? quant.complementarySignal : null),
+              title: `${topSig.selection} (%${topSig.confidence} Güven)`,
+              message: topSig.reasoning
+            });
+          }
         }
       }
-    }
 
-    this.store.matches.set(match.matchId, match);
-    if (detectedEvents.length > 0) {
-      this.store.pushEvents(detectedEvents);
-    }
-    if (detectedSignals.length > 0) {
-      this.store.pushSignals(detectedSignals, this.store.matches);
-    }
+      this.store.matches.set(match.matchId, match);
+      if (detectedEvents.length > 0) {
+        this.store.pushEvents(detectedEvents);
+      }
+      if (detectedSignals.length > 0) {
+        this.store.pushSignals(detectedSignals, this.store.matches);
+      }
 
-    return { detectedEvents, detectedSignals };
+      return { detectedEvents, detectedSignals };
+    });
   }
 
   cloneMatchSnapshot(m) {
@@ -1063,7 +1073,7 @@ class MultiSourceOrchestrator {
         canonical._deepHydrated = true;
       }
 
-      const { detectedEvents, detectedSignals } = this.evaluateAndCommitMatch(prevSnap, canonical);
+      const { detectedEvents, detectedSignals } = await this.evaluateAndCommitMatch(prevSnap, canonical);
       if (detectedEvents.length > 0) allNewEvents.push(...detectedEvents);
       if (detectedSignals.length > 0) allNewSignals.push(...detectedSignals);
     }
@@ -1181,7 +1191,17 @@ class MultiSourceOrchestrator {
     await Promise.allSettled(promises);
     match._deepHydrated = true;
     match._deepCount = (match._deepCount || 0) + 1;
-    return this.evaluateAndCommitMatch(prevSnap, match);
+
+    // Resynchronize baseline score & minute from store to eliminate race condition with spine poller
+    const currentInStore = this.store.matches.get(match.matchId);
+    if (currentInStore && prevSnap) {
+      prevSnap.home.score = currentInStore.home.score;
+      prevSnap.away.score = currentInStore.away.score;
+      prevSnap.minute = currentInStore.minute;
+      prevSnap.status = currentInStore.status;
+    }
+
+    return await this.evaluateAndCommitMatch(prevSnap, match);
   }
 
   async pollDeepTelemetry() {

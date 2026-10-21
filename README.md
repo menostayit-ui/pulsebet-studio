@@ -126,31 +126,30 @@ By synthesizing rolling high-frequency pressure telemetry with a dynamically cal
 
 ## 📐 Mathematical Formulation
 
-### 1. Dixon-Coles Bivariate Poisson In-Play Model
-Independent Poisson distributions systematically underestimate low-score draws ($0-0, 1-1$) in professional football. PulseBet Studio implements the **Dixon-Coles adjustment parameter** ($\tau_{DC}$):
+### 1. Dixon-Coles Bivariate Poisson In-Play Formulation
+Standard independent Poisson models underestimate low-score draws ($0-0, 1-1$). PulseBet Studio applies the **Dixon-Coles adjustment parameter** ($\tau_{DC}$), strictly conditioned on the **full-time match score** ($f_H = g_H + x, f_A = g_A + y$):
 
-$$P(X = x, Y = y) = \tau_{\lambda, \mu}(x, y) \cdot \frac{\lambda^x e^{-\lambda}}{x!} \cdot \frac{\mu^y e^{-\mu}}{y!}$$
+$$P(X = x, Y = y) = \tau_{\lambda, \mu}(f_H, f_A) \cdot \frac{\lambda_{\text{rem}}^x e^{-\lambda_{\text{rem}}}}{x!} \cdot \frac{\mu_{\text{rem}}^y e^{-\mu_{\text{rem}}}}{y!}$$
 
-Where the adjustment factor $\tau$ modifies baseline joint probabilities:
-
-$$\tau_{\lambda, \mu}(x, y) = \begin{cases} 
-1 - \lambda \mu \rho & x = 0, y = 0 \\
-1 + \lambda \rho & x = 0, y = 1 \\
-1 + \mu \rho & x = 1, y = 0 \\
-1 - \rho & x = 1, y = 1 \\
-1 & \text{otherwise}
+Where:
+$$\tau(f_H, f_A) = \begin{cases} 
+1 - \lambda_{\text{fullH}} \lambda_{\text{fullA}} \rho & f_H = 0, f_A = 0 \\
+1 + \lambda_{\text{fullH}} \rho & f_H = 0, f_A = 1 \\
+1 + \lambda_{\text{fullA}} \rho & f_H = 1, f_A = 0 \\
+1 - \rho & f_H = 1, f_A = 1 \\
+1.0 & \text{otherwise } (f_H > 1 \text{ or } f_A > 1)
 \end{cases}$$
 
-*(Live correlation coefficient calibrated at $\rho = -0.10$)*
+*(Live correlation parameter calibrated at $\rho = -0.10$, correctly preventing erroneous low-score bias on matches with existing leads)*.
 
-### 2. In-Game Pressure (IGP) Index & Pass Control Efficiency (PCE)
-Continuously computed for Home and Away sides on a rolling $[0, 100]$ scale, incorporating Pass Control Efficiency ($PCE$) to filter out sterile back-line circulation:
+### 2. In-Game Pressure (IGP), Pass Control Efficiency (PCE) & Field Tilt
+Continuously computed for Home and Away sides on a rolling $[0, 100]$ scale, incorporating Pass Control Efficiency ($PCE$) and UEFA-Pro **Field Tilt %** ($FT = \frac{DA_{\text{team}}}{DA_H + DA_A} \times 100$) to filter out sterile back-line circulation:
 
 $$IGP_{team} = PCE \cdot \left( w_{poss} \cdot \Phi_{poss} + w_{sot} \cdot SOT_{10m} + w_{box} \cdot S_{box, 10m} + w_{crn} \cdot Corners_{10m} + w_{da} \cdot DA_{10m} \right)$$
 
-Where $PCE$ decouples progression from sterile possession:
-- **Sterile Circulation ($PCE \in [0.72, 0.88]$):** High pass accuracy with low final-third conversion.
-- **Vertical Progressive Siege ($PCE \in [1.12, 1.38]$):** High dangerous attack conversion ($\ge 52\%$) and low passes per penetration ($\le 12$).
+Where $PCE$ decouples vertical progression from sterile horizontal circulation:
+- **Sterile Circulation ($PCE \in [0.72, 0.88]$):** High pass accuracy ($\ge 79\%$) with low final-third conversion ($DA/Attacks < 40\%$).
+- **Vertical Progressive Siege ($PCE \in [1.12, 1.38]$):** High dangerous attack conversion ($\ge 52\%$), Field Tilt $\ge 55\%$, and low passes per penetration ($\le 12$).
 
 ### 3. Goalkeeper Resistance Index (GRI) & Unsustainable Variance
 Evaluates whether high opposition save counts represent an insurmountable barrier or imminent mean-reversion goal arrival:
@@ -167,14 +166,16 @@ Operational between minutes 68' and 88' in 1-goal margin matches ($|g_H - g_A| =
 - **Trailing Equalizer Overload ($IGP \ge 65$):** $+25\%$ to $+45\%$ residual equalizer lambda boost.
 - **Leading Counter-Attack Transition:** $+20\%$ to $+38\%$ counter-attack goal lambda boost when the trailing team commits transition turnovers.
 
-### 6. Synthetic Vig Stripping & Expected Value (+EV)
-Extracts true un-vigged market implied probabilities via proportional normalization:
+### 6. Non-Uniform Vig Stripping (Favorite-Longshot Power Model) & Expected Value (+EV)
+Standard uniform overround division ignores bookmaker skew where heavy favorites carry low margin (1.5-2.5%) and longshots carry high margin (7-12%). PulseBet Studio implements the **Power Model**:
 
-$$p_{fair} = \frac{1 / O_{market}}{\sum_{k} 1 / O_k}$$
+$$p_i = \frac{(1 / O_i)^k}{\sum_{j} (1 / O_j)^k}$$
+
+Where exponent $k$ is solved via root convergence such that $\sum (1 / O_i)^k = 1.0$.
 
 Mathematical Expected Value (+EV) is strictly enforced:
 
-$$EV_{\%} = (p_{model} \times O_{market} - 1) \times 100 \ge +3.0\%$$
+$$EV_{\%} = (p_{\text{model}} \times O_{\text{market}} - 1) \times 100 \ge +3.0\%$$
 
 ### 7. Game-State Exponential Decay
 When a team achieves a commanding lead ($\Delta_{score} \ge 2$ at $t \ge 58'$ or $\Delta_{score} \ge 3$), residual offensive rates undergo exponential decay:
