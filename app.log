@@ -1,0 +1,9 @@
+
+> pulsebet-studio@1.2.1 start
+> node src/server.js
+
+
+PulseBet Studio — Yerel Analiz & Canlı Bahis Terminali
+🌐 Yerel Erişim: http://127.0.0.1:3850 (Ağ/IP Paylaşımı Devre Dışı)
+[Orchestrator] Initializing Multi-Source Scrapers (Flashscore + 365Scores + ESPN)...
+[MultiSourceSync] Flashscore: 519 | 365Scores: 318 | ESPN: 100 matches
