@@ -30,7 +30,7 @@
     events: [],
     signals: [],
     signalLedger: [],
-    signalStats: { total: 0, won: 0, lost: 0, pending: 0, hitRatePct: 0 },
+    signalStats: { total: 0, won: 0, lost: 0, pending: 0, hitRatePct: 0, roiYieldPct: 0, brierScore: null },
     starredIds: new Set(),
     dismissedIds: new Set(),
     selectedMatchId: null,
@@ -231,6 +231,103 @@
     return clean || fallback;
   }
 
+  /**
+   * Separated Quantitative Metrics Extractor & Formatter:
+   * 1. Model Probability: %${sig.modelProbability || sig.confidence || 58}
+   * 2. Conviction Score: ${sig.convictionScore || 75}/100
+   * 3. Market Advantage: if sig.evPct != null -> EV: +%${sig.evPct}, else if sig.marketEdgePp != null -> Fark: +${sig.marketEdgePp} pp, else -> Model Tahmini
+   * 4. Signal Type Badge: Value Bet (DEĞER SİNYALİ) vs Model Forecast (MODEL SİNYALİ)
+   * Enforces rule: NEVER display convictionScore as a win percentage (%82 Güven is misleading).
+   */
+  function extractQuantitativeMetrics(sig) {
+    if (!sig) {
+      return {
+        modelProb: 58,
+        convictionScore: 75,
+        marketAdvantage: t('badge_model_signal', 'Model Tahmini'),
+        signalTypeBadge: t('badge_model_signal', 'MODEL TAHMİNİ'),
+        typeClass: 'sig-type-model',
+        isValue: false
+      };
+    }
+
+    const modelProb = sig.modelProbability ?? sig.modelProbPct ?? sig.confidence ?? 58;
+    const convictionScore = sig.convictionScore ?? sig.confidence ?? 75;
+
+    let marketAdvantage = '';
+    if (sig.evPct != null) {
+      const num = Number(sig.evPct);
+      const sign = num >= 0 ? '+' : '';
+      marketAdvantage = `EV: ${sign}%${sig.evPct}`;
+    } else if (sig.marketEdgePp != null) {
+      const num = Number(sig.marketEdgePp);
+      const sign = num >= 0 ? '+' : '';
+      marketAdvantage = `Fark: ${sign}${sig.marketEdgePp} pp`;
+    } else if (sig.edgePct != null) {
+      const num = Number(sig.edgePct);
+      const sign = num >= 0 ? '+' : '';
+      marketAdvantage = `Fark: ${sign}${sig.edgePct} pp`;
+    } else {
+      marketAdvantage = t('badge_model_signal', 'Model Tahmini');
+    }
+
+    // Distinguish DEĞER SİNYALİ (Value Signal with real market edge) vs MODEL SİNYALİ (statistical divergence without verified odds)
+    const hasRealOdds = sig.hasRealOdds === true || (sig.hasRealOdds !== false && !sig.isSyntheticOdds && (sig.evPct != null || sig.odds || sig.marketOdds));
+    const isExplicitModel = sig.hasRealOdds === false || sig.isSyntheticOdds === true || (sig.signalTier && sig.signalTier.includes('MODEL'));
+    const isValue = hasRealOdds && !isExplicitModel;
+
+    const signalTypeBadge = isValue
+      ? t('badge_value_signal', 'DEĞER SİNYALİ')
+      : t('badge_model_signal', 'MODEL SİNYALİ');
+    const typeClass = isValue ? 'sig-type-value' : 'sig-type-model';
+
+    return {
+      modelProb,
+      convictionScore,
+      marketAdvantage,
+      signalTypeBadge,
+      typeClass,
+      isValue
+    };
+  }
+
+  function getSettlementStatusMeta(st) {
+    const status = st || 'PENDING';
+    if (status === 'WON') {
+      return {
+        cardCls: 'sig-won',
+        badgeCls: 'won',
+        label: t('score_won', 'TUTTU')
+      };
+    }
+    if (status === 'LOST') {
+      return {
+        cardCls: 'sig-lost',
+        badgeCls: 'lost',
+        label: t('score_lost', 'TUTMADI')
+      };
+    }
+    if (status === 'UNDER_REVIEW') {
+      return {
+        cardCls: 'sig-review',
+        badgeCls: 'review',
+        label: t('badge_under_review', 'İNCELEMEDE')
+      };
+    }
+    if (status === 'INVALIDATED') {
+      return {
+        cardCls: 'sig-invalidated',
+        badgeCls: 'invalidated',
+        label: t('badge_invalidated', 'GEÇERSİZ')
+      };
+    }
+    return {
+      cardCls: 'sig-pending',
+      badgeCls: 'pending',
+      label: t('score_in_play', 'AKTİF')
+    };
+  }
+
   function getSafePlayerName(obj, fallback = '') {
     if (!obj) return fallback;
     const raw = typeof obj === 'string' ? obj : (obj.name || obj.playerName || obj.athlete || obj.player || obj.scorer);
@@ -371,21 +468,50 @@
   }
 
   function recomputeClientSignalStats() {
-    let won = 0, lost = 0, pending = 0;
+    let won = 0, lost = 0, pending = 0, underReview = 0, invalidated = 0;
+    let brierSum = 0, brierCount = 0;
+    let totalProfitUnits = 0;
+
     for (const item of state.signalLedger) {
       if (state.dismissedIds.has(item.id)) continue;
-      if (item.settlementStatus === 'WON') won++;
-      else if (item.settlementStatus === 'LOST') lost++;
-      else if (item.settlementStatus === 'PENDING') pending++;
+      const st = item.settlementStatus;
+      if (st === 'WON') {
+        won++;
+        const odds = Number(item.odds || 1.8);
+        totalProfitUnits += (odds - 1);
+        const p = (item.modelProbability ?? item.modelProbPct ?? item.confidence ?? 60) / 100;
+        brierSum += Math.pow(1 - p, 2);
+        brierCount++;
+      } else if (st === 'LOST') {
+        lost++;
+        totalProfitUnits -= 1;
+        const p = (item.modelProbability ?? item.modelProbPct ?? item.confidence ?? 60) / 100;
+        brierSum += Math.pow(0 - p, 2);
+        brierCount++;
+      } else if (st === 'PENDING') {
+        pending++;
+      } else if (st === 'UNDER_REVIEW') {
+        underReview++;
+      } else if (st === 'INVALIDATED') {
+        invalidated++;
+      }
     }
+
     const settled = won + lost;
     const hitRatePct = settled > 0 ? Math.round((won / settled) * 100) : 0;
+    const roiYieldPct = settled > 0 ? Math.round((totalProfitUnits / settled) * 100) : 0;
+    const brierScore = brierCount > 0 ? Number((brierSum / brierCount).toFixed(3)) : null;
+
     state.signalStats = {
-      total: won + lost + pending,
+      total: won + lost + pending + underReview + invalidated,
       won,
       lost,
       pending,
-      hitRatePct
+      underReview,
+      invalidated,
+      hitRatePct,
+      roiYieldPct: state.signalStats?.roiYieldPct ?? roiYieldPct,
+      brierScore: state.signalStats?.brierScore ?? brierScore
     };
   }
 
@@ -947,6 +1073,7 @@
     let html = '';
     if (ledgerEntry && ledgerEntry.settlementStatus === 'WON') {
       const wonSelection = tSelection(ledgerEntry.selection || t('valuable_selection', 'Değerli Seçim'));
+      const wonQm = extractQuantitativeMetrics(ledgerEntry);
       html = `
         <div class="signal-spotlight-card">
           <div class="ss-top">
@@ -957,6 +1084,7 @@
             </div>
             <div class="ss-metrics">
               <span class="sig-outcome-badge won">${cleanBadgeText(ledgerEntry.settlementBadge, t('score_won', 'TUTTU'))}</span>
+              <span class="ss-metric-pill" title="${t('metric_model_prob', 'Model Olasılığı')}">%${wonQm.modelProb} ${t('metric_model_prob', 'Model')} • ${wonQm.convictionScore}/100 ${t('metric_conviction_index', 'İkna')}</span>
               <span class="ss-metric-pill">${t('odds', 'Oran')}: <b>@${ledgerEntry.odds || '1.80'}</b></span>
             </div>
           </div>
@@ -966,18 +1094,22 @@
     } else if (hasValidSig && quant.primarySignal) {
       const p = quant.primarySignal;
       const c = quant.complementarySignal;
+      const qm = extractQuantitativeMetrics(p);
+      const cq = c ? extractQuantitativeMetrics(c) : null;
       html = `
         <div class="signal-spotlight-card">
           <div class="ss-top">
             <div class="ss-pick-group">
-              <span class="ss-badge">${t('spotlight_active_badge', 'SİNYAL AKTİF')}</span>
+              <span class="ss-badge ${qm.typeClass}">${qm.signalTypeBadge}</span>
               <span class="ss-pick-name">${escapeHtml(tSelection(p.selection || t('valuable_selection', 'Değerli Seçim')))}</span>
               <span class="ss-market-label">(${escapeHtml(tMarket(p.marketTitle || t('tab_markets', 'Market')))})</span>
             </div>
             <div class="ss-metrics">
-              <span class="ss-metric-pill">${t('confidence', 'Güven')}: <b style="color:var(--emerald-bright)">%${p.confidence || 75}</b></span>
+              <span class="ss-metric-pill" title="${t('metric_model_prob', 'Model Olasılığı')}">${t('metric_model_prob', 'Model')}: <b style="color:var(--emerald-bright)">%${qm.modelProb}</b></span>
+              <span class="ss-metric-pill" title="${t('metric_conviction_index', 'İkna Skoru')}">${t('metric_conviction_index', 'İkna')}: <b>${qm.convictionScore}/100</b></span>
+              <span class="ss-metric-pill" title="${t('metric_market_edge', 'Piyasa Avantajı')}">${t('metric_market_edge', 'Avantaj')}: <b>${qm.marketAdvantage}</b></span>
               <span class="ss-metric-pill">${t('odds', 'Oran')}: <b>@${p.marketOdds || p.fairOdds || '1.80'}</b></span>
-              ${c ? `<span class="ss-metric-pill">${t('tab_both_header', 'Ek')}: <b>${escapeHtml(tSelection(c.selection))} (%${c.confidence})</b></span>` : ''}
+              ${c && cq ? `<span class="ss-metric-pill">${t('tab_both_header', 'Ek')}: <b>${escapeHtml(tSelection(c.selection))} (%${cq.modelProb} • ${cq.convictionScore}/100)</b></span>` : ''}
             </div>
           </div>
           <div class="ss-reason">${escapeHtml(p.reasoning || '')}</div>
@@ -985,13 +1117,17 @@
       `;
     } else if (match.status === 'LIVE' && (match.minute || 0) < 75 && quant.signalStatus === 'WATCHLIST' && quant.primarySignal) {
       const w = quant.primarySignal;
+      const wq = extractQuantitativeMetrics(w);
       html = `
         <div class="signal-spotlight-card watchlist">
           <div class="ss-top">
             <div class="ss-pick-group">
               <span class="ss-badge" style="background:var(--amber-soft);color:var(--amber)">${t('spotlight_radar_badge', 'RADARDA')} ${t('tracking_flow', 'İZLENİYOR')}</span>
               <span class="ss-pick-name">${escapeHtml(tSelection(w.selection || t('valuable_selection', 'Değerli Seçim')))}</span>
-              <span class="ss-market-label">(${t('confidence', 'Güven')}: %${w.confidence || 65})</span>
+              <span class="ss-market-label">(%${wq.modelProb} ${t('metric_model_prob', 'Model Olasılığı')} • ${wq.convictionScore}/100 ${t('metric_conviction_index', 'İkna')})</span>
+            </div>
+            <div class="ss-metrics">
+              <span class="ss-metric-pill" title="${t('metric_market_edge', 'Piyasa Avantajı')}">${wq.marketAdvantage}</span>
             </div>
           </div>
           <div class="ss-reason">${escapeHtml(quant.signalStatusReason || t('spotlight_default_reason', 'Saha içi baskı artışı takip ediliyor; sinyal tetiklemek için şut kalitesi ve oran eşiği bekleniyor.'))}</div>
@@ -1368,18 +1504,26 @@
           </div>
         </div>
 
-        ${hasValidSig && primarySig ? `
-          <div class="nc-signal-box" style="margin-bottom:0">
-            <div>
-              <span class="nc-sig-tag">${escapeHtml(cleanBadgeText(flow.archetypeLabel, t('signal_active_tag', 'CANLI SİNYAL')))}</span>
-              <h4 class="nc-sig-market">${escapeHtml(primarySig.selection || t('valuable_selection', 'Değerli Seçim'))}</h4>
+        ${hasValidSig && primarySig ? (() => {
+          const qm = extractQuantitativeMetrics(primarySig);
+          return `
+            <div class="nc-signal-box" style="margin-bottom:0">
+              <div>
+                <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;flex-wrap:wrap">
+                  <span class="nc-sig-tag ${qm.typeClass}">${qm.signalTypeBadge}</span>
+                  <span class="nc-sig-tag" style="background:transparent;border:none;color:var(--text-muted);padding:0">${escapeHtml(cleanBadgeText(flow.archetypeLabel, t('flow_signal_tag', 'GİDİŞAT')))}</span>
+                </div>
+                <h4 class="nc-sig-market">${escapeHtml(tSelection(primarySig.selection || t('valuable_selection', 'Değerli Seçim')))}</h4>
+              </div>
+              <div class="nc-sig-metrics">
+                <span class="nc-odd-badge">@${primarySig.marketOdds || primarySig.fairOdds || '1.80'}</span>
+                <span class="nc-prob-badge" title="${t('metric_model_prob', 'Model Olasılığı')}">%${qm.modelProb} ${t('metric_model_prob', 'Model')}</span>
+                <span class="nc-conv-badge" title="${t('metric_conviction_index', 'İkna Skoru')}">${qm.convictionScore}/100 ${t('metric_conviction_index', 'İkna')}</span>
+                <span class="nc-edge-badge" title="${t('metric_market_edge', 'Piyasa Avantajı')}">${qm.marketAdvantage}</span>
+              </div>
             </div>
-            <div class="nc-sig-metrics">
-              <span class="nc-odd-badge">@${primarySig.marketOdds || primarySig.fairOdds || '1.80'}</span>
-              <span class="nc-conf-badge">%${primarySig.confidence || 75} ${t('confidence', 'Güven')}</span>
-            </div>
-          </div>
-        ` : `
+          `;
+        })() : `
           <div style="font-size:11.5px;color:var(--text-secondary)">
             <strong>${escapeHtml(isUpcoming ? t('prematch_expectation', 'Maç Önü Beklentisi') : (cleanBadgeText(flow.archetypeLabel, t('tracking_flow', 'Gidişat'))))}:</strong>
             ${escapeHtml(isUpcoming ? (quant.signalStatusReason || t('spotlight_scanning_sub_prematch', 'Başlama saati bekleniyor.')) : (flow.narrative || t('tracking_flow', 'Maç takip ediliyor.')))}
@@ -1394,16 +1538,14 @@
     const aName = item.awayName || t('team_away', 'Deplasman');
     const hLogo = resolveLogo(item.homeLogo, hName);
     const aLogo = resolveLogo(item.awayLogo, aName);
-    const st = item.settlementStatus || 'PENDING';
-    const cls = st === 'WON' ? 'sig-won' : (st === 'LOST' ? 'sig-lost' : 'sig-pending');
-    const badgeCls = st === 'WON' ? 'won' : (st === 'LOST' ? 'lost' : 'pending');
-    const badgeLabel = st === 'WON' ? t('score_won', 'TUTTU') : (st === 'LOST' ? t('score_lost', 'TUTMADI') : t('score_in_play', 'AKTİF'));
+    const stMeta = getSettlementStatusMeta(item.settlementStatus);
+    const qm = extractQuantitativeMetrics(item);
 
     return `
-      <div class="bento-match-card ${cls}" data-match-id="${escapeHtml(item.matchId)}">
+      <div class="bento-match-card ${stMeta.cardCls}" data-match-id="${escapeHtml(item.matchId)}">
         <div class="bmc-top">
           <span>${escapeHtml(item.leagueName || t('league_other', 'Futbol Ligi'))}</span>
-          <span class="sig-outcome-badge ${badgeCls}">${cleanBadgeText(item.settlementBadge, badgeLabel)}</span>
+          <span class="sig-outcome-badge ${stMeta.badgeCls}">${cleanBadgeText(item.settlementBadge, stMeta.label)}</span>
         </div>
 
         <div class="bmc-teams">
@@ -1420,12 +1562,17 @@
 
         <div class="nc-signal-box" style="margin-bottom:0">
           <div>
-            <span class="nc-sig-tag">${escapeHtml(cleanBadgeText(item.archetypeLabel || item.marketTitle, t('signal_active_tag', 'CANLI SİNYAL')))}</span>
-            <h4 class="nc-sig-market">${escapeHtml(item.selection || t('valuable_selection', 'Değerli Seçim'))}</h4>
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;flex-wrap:wrap">
+              <span class="nc-sig-tag ${qm.typeClass}">${qm.signalTypeBadge}</span>
+              <span class="nc-sig-tag" style="background:transparent;border:none;color:var(--text-muted);padding:0">${escapeHtml(cleanBadgeText(item.archetypeLabel || item.marketTitle, t('flow_signal_tag', 'GİDİŞAT')))}</span>
+            </div>
+            <h4 class="nc-sig-market">${escapeHtml(tSelection(item.selection || t('valuable_selection', 'Değerli Seçim')))}</h4>
           </div>
           <div class="nc-sig-metrics">
             <span class="nc-odd-badge">@${item.odds || '-'}</span>
-            <span class="nc-conf-badge">%${item.confidence || 72} ${t('confidence', 'Güven')}</span>
+            <span class="nc-prob-badge" title="${t('metric_model_prob', 'Model Olasılığı')}">%${qm.modelProb} ${t('metric_model_prob', 'Model')}</span>
+            <span class="nc-conv-badge" title="${t('metric_conviction_index', 'İkna Skoru')}">${qm.convictionScore}/100 ${t('metric_conviction_index', 'İkna')}</span>
+            <span class="nc-edge-badge" title="${t('metric_market_edge', 'Piyasa Avantajı')}">${qm.marketAdvantage}</span>
           </div>
         </div>
 
@@ -1466,11 +1613,26 @@
 
   function renderRadarView() {
     const st = state.signalStats;
-    document.getElementById('rkpiTotal').textContent = st.total;
-    document.getElementById('rkpiWon').textContent = st.won;
-    document.getElementById('rkpiLost').textContent = st.lost;
-    document.getElementById('rkpiPending').textContent = st.pending;
-    document.getElementById('rkpiRate').textContent = `%${st.hitRatePct}`;
+    const elTotal = document.getElementById('rkpiTotal');
+    const elWon = document.getElementById('rkpiWon');
+    const elLost = document.getElementById('rkpiLost');
+    const elPending = document.getElementById('rkpiPending');
+    const elRate = document.getElementById('rkpiRate');
+    const elRoi = document.getElementById('rkpiRoi');
+    const elBrier = document.getElementById('rkpiBrier');
+
+    if (elTotal) elTotal.textContent = st.total;
+    if (elWon) elWon.textContent = st.won;
+    if (elLost) elLost.textContent = st.lost;
+    if (elPending) elPending.textContent = st.pending;
+    if (elRate) elRate.textContent = `%${st.hitRatePct}`;
+    if (elRoi) {
+      const roi = st.roiYieldPct || 0;
+      elRoi.textContent = `${Number(roi) >= 0 ? '+' : ''}%${roi}`;
+    }
+    if (elBrier) {
+      elBrier.textContent = st.brierScore != null ? Number(st.brierScore).toFixed(3) : '-';
+    }
 
     // 1. Render Tracked Signals Ledger Grid
     const ledgerGrid = document.getElementById('radarLedgerGrid');
@@ -1578,13 +1740,11 @@
       const aName = sig.awayName || t('team_away', 'Deplasman');
       const hLogo = resolveLogo(sig.homeLogo, hName);
       const aLogo = resolveLogo(sig.awayLogo, aName);
-      const stStatus = sig.settlementStatus || 'PENDING';
-      const cardStClass = stStatus === 'WON' ? 'sig-won' : (stStatus === 'LOST' ? 'sig-lost' : 'sig-pending');
-      const badgeStClass = stStatus === 'WON' ? 'won' : (stStatus === 'LOST' ? 'lost' : 'pending');
-      const defaultBadge = stStatus === 'WON' ? t('score_won', 'TUTTU') : (stStatus === 'LOST' ? t('score_lost', 'TUTMADI') : t('score_in_play', 'AKTİF'));
+      const stMeta = getSettlementStatusMeta(sig.settlementStatus);
+      const qm = extractQuantitativeMetrics(sig);
 
       return `
-        <div class="notif-card signal-card ${cardStClass}" data-match-id="${escapeHtml(sig.matchId)}">
+        <div class="notif-card signal-card ${stMeta.cardCls}" data-match-id="${escapeHtml(sig.matchId)}">
           <div class="nc-top">
             <div class="nc-match-identity">
               <div class="nc-crests">
@@ -1597,19 +1757,24 @@
               </div>
             </div>
             <div class="nc-meta-right">
-              <span class="sig-outcome-badge ${badgeStClass}">${cleanBadgeText(sig.settlementBadge, defaultBadge)}</span>
+              <span class="sig-outcome-badge ${stMeta.badgeCls}">${cleanBadgeText(sig.settlementBadge, stMeta.label)}</span>
               <button class="nc-dismiss-btn" data-dismiss-sig="${escapeHtml(sig.id)}" title="${t('dismiss_signal', 'Sinyali Gizle')}">×</button>
             </div>
           </div>
 
           <div class="nc-signal-box">
             <div>
-              <span class="nc-sig-tag">${escapeHtml(cleanBadgeText(sig.tierBadge, t('spotlight_active_badge', 'SİNYAL AKTİF')))} • ${escapeHtml(tArchetype(sig.archetypeKey || sig.archetype, cleanBadgeText(sig.archetypeLabel, t('flow_signal_tag', 'GİDİŞAT SİNYALİ'))))}</span>
+              <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;flex-wrap:wrap">
+                <span class="nc-sig-tag ${qm.typeClass}">${qm.signalTypeBadge}</span>
+                <span class="nc-sig-tag" style="background:transparent;border:none;color:var(--text-muted);padding:0">${escapeHtml(tArchetype(sig.archetypeKey || sig.archetype, cleanBadgeText(sig.archetypeLabel, t('flow_signal_tag', 'GİDİŞAT SİNYALİ'))))}</span>
+              </div>
               <h4 class="nc-sig-market">${escapeHtml(tSelection(sig.selection || t('valuable_selection', 'Değerli Seçim')))}</h4>
             </div>
             <div class="nc-sig-metrics">
               <span class="nc-odd-badge">@${sig.odds || '-'}</span>
-              <span class="nc-conf-badge">%${sig.confidence || 75} ${t('confidence', 'Güven')}</span>
+              <span class="nc-prob-badge" title="${t('metric_model_prob', 'Model Olasılığı')}">%${qm.modelProb} ${t('metric_model_prob', 'Model')}</span>
+              <span class="nc-conv-badge" title="${t('metric_conviction_index', 'İkna Skoru')}">${qm.convictionScore}/100 ${t('metric_conviction_index', 'İkna')}</span>
+              <span class="nc-edge-badge" title="${t('metric_market_edge', 'Piyasa Avantajı')}">${qm.marketAdvantage}</span>
             </div>
           </div>
 

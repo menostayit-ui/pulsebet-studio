@@ -3,7 +3,7 @@
  * Institutional Quantitative Architecture:
  *  - Goalkeeper Resistance Index (GRI):
  *      * Evaluates opposing goalkeeper performance (>= 4 saves or >= 85% save rate) under continuous high-danger shots
- *      * Distinguishes unsustainable post-shot variance (+18% next goal edge, mean reversion goal arrival imminent) from impenetrable wall (conviction damping)
+ *      * Distinguishes unsustainable post-shot variance (mean reversion goal arrival imminent, tactical conviction boost) from impenetrable wall (conviction damping)
  *  - Possession Quality & Pass Control Efficiency (PCE):
  *      * Incorporates passAccuracy, passesCompleted vs dangerousAttacks
  *      * Distinguishes sterile back-line circulation from vertical progressive siege
@@ -29,6 +29,199 @@
  *  - Synthetic Vig Stripping & Institutional +EV Valuation: Strips bookmaker margin to derive true un-vigged market implied probabilities
  *  - 5-Pillar Conviction Scoring (Value Edge 28%, Momentum/IGP 22%, HDI & xG Debt 20%, Tactical Alignment 18%, Steam 12%)
  */
+
+/**
+ * Formal MarketDefinition contract representing unified settlement rules and state validity.
+ */
+class MarketDefinition {
+  constructor({
+    marketKey,
+    line = null,
+    period = 'FT',
+    selection,
+    targetTeam = null,
+    winCondition = null,
+    lossCondition = null
+  }) {
+    this.marketKey = marketKey;
+    this.line = typeof line === 'number' ? line : MarketDefinition.parseLine(selection);
+    this.period = period; // 'FT' | 'HT'
+    this.selection = selection;
+    this.targetTeam = targetTeam; // 'HOME' | 'AWAY' | 'DRAW' | 'NONE' | null
+    this.winCondition = typeof winCondition === 'function' ? winCondition : MarketDefinition.createDefaultWinCondition(this);
+    this.lossCondition = typeof lossCondition === 'function' ? lossCondition : MarketDefinition.createDefaultLossCondition(this);
+  }
+
+  static parseLine(selection, defaultLine = null) {
+    if (!selection) return defaultLine;
+    const match = String(selection).match(/(\d+(?:\.\d+)?)\s*(?:Üst|Alt)/i) || String(selection).match(/(\d+(?:\.\d+)?)/);
+    if (match) {
+      const val = parseFloat(match[1]);
+      if (!isNaN(val)) return val;
+    }
+    return defaultLine;
+  }
+
+  goalsNeededToWin(currentGoals = 0) {
+    if (this.line == null) return null;
+    const winThreshold = Math.floor(Number(this.line) + 1e-4) + 1;
+    return winThreshold - currentGoals;
+  }
+
+  isSettledWon(state) {
+    try {
+      return Boolean(this.winCondition && this.winCondition(state));
+    } catch (_) {
+      return false;
+    }
+  }
+
+  isSettledLost(state) {
+    try {
+      return Boolean(this.lossCondition && this.lossCondition(state));
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static createDefaultWinCondition(def) {
+    const { marketKey, selection, line, period, targetTeam } = def;
+    const isHt = period === 'HT' || marketKey === 'HT_OU' || marketKey === 'HT_BTTS';
+
+    if (marketKey === 'OU' || marketKey === 'HT_OU') {
+      const isOver = selection.includes('Üst');
+      if (isOver) {
+        return (state) => {
+          const tot = isHt ? (state.isLive && state.minute <= 45 ? state.totalGoals : state.htTotalGoals) : state.totalGoals;
+          return tot > line;
+        };
+      } else {
+        return (state) => {
+          const tot = isHt ? state.htTotalGoals : state.totalGoals;
+          const terminated = isHt ? state.isHalfTimeOrLater : state.isFinished;
+          return terminated && tot <= line;
+        };
+      }
+    }
+
+    if (marketKey === 'BTTS' || marketKey === 'HT_BTTS') {
+      const isYes = selection.includes('KG Var');
+      if (isYes) {
+        return (state) => {
+          const h = isHt ? (state.isLive && state.minute <= 45 ? state.homeScore : state.htHomeScore) : state.homeScore;
+          const a = isHt ? (state.isLive && state.minute <= 45 ? state.awayScore : state.htAwayScore) : state.awayScore;
+          return h >= 1 && a >= 1;
+        };
+      } else {
+        return (state) => {
+          const h = isHt ? state.htHomeScore : state.homeScore;
+          const a = isHt ? state.htAwayScore : state.awayScore;
+          const terminated = isHt ? state.isHalfTimeOrLater : state.isFinished;
+          return terminated && (h === 0 || a === 0);
+        };
+      }
+    }
+
+    if (marketKey === 'MS') {
+      return (state) => {
+        if (!state.isFinished) return false;
+        if (targetTeam === 'HOME' || selection.includes('MS 1')) return state.homeScore > state.awayScore;
+        if (targetTeam === 'AWAY' || selection.includes('MS 2')) return state.awayScore > state.homeScore;
+        if (targetTeam === 'DRAW' || selection.includes('MS X')) return state.homeScore === state.awayScore;
+        return false;
+      };
+    }
+
+    if (marketKey === 'NEXT_GOAL') {
+      return (state) => {
+        const trigH = state.triggerHomeScore ?? 0;
+        const trigA = state.triggerAwayScore ?? 0;
+        const trigTot = trigH + trigA;
+        if (selection.includes('Ev Sahibi') || targetTeam === 'HOME') {
+          return state.homeScore > trigH && state.awayScore === trigA;
+        }
+        if (selection.includes('Deplasman') || targetTeam === 'AWAY') {
+          return state.awayScore > trigA && state.homeScore === trigH;
+        }
+        if (selection.includes('Gol Olmaz') || targetTeam === 'NONE') {
+          return state.isFinished && state.totalGoals === trigTot;
+        }
+        return false;
+      };
+    }
+
+    return () => false;
+  }
+
+  static createDefaultLossCondition(def) {
+    const { marketKey, selection, line, period, targetTeam } = def;
+    const isHt = period === 'HT' || marketKey === 'HT_OU' || marketKey === 'HT_BTTS';
+
+    if (marketKey === 'OU' || marketKey === 'HT_OU') {
+      const isOver = selection.includes('Üst');
+      if (isOver) {
+        return (state) => {
+          const tot = isHt ? state.htTotalGoals : state.totalGoals;
+          const terminated = isHt ? state.isHalfTimeOrLater : state.isFinished;
+          return terminated && tot <= line;
+        };
+      } else {
+        return (state) => {
+          const tot = isHt ? (state.isLive && state.minute <= 45 ? state.totalGoals : state.htTotalGoals) : state.totalGoals;
+          return tot > line;
+        };
+      }
+    }
+
+    if (marketKey === 'BTTS' || marketKey === 'HT_BTTS') {
+      const isYes = selection.includes('KG Var');
+      if (isYes) {
+        return (state) => {
+          const h = isHt ? state.htHomeScore : state.homeScore;
+          const a = isHt ? state.htAwayScore : state.awayScore;
+          const terminated = isHt ? state.isHalfTimeOrLater : state.isFinished;
+          return terminated && (h === 0 || a === 0);
+        };
+      } else {
+        return (state) => {
+          const h = isHt ? (state.isLive && state.minute <= 45 ? state.homeScore : state.htHomeScore) : state.homeScore;
+          const a = isHt ? (state.isLive && state.minute <= 45 ? state.awayScore : state.htAwayScore) : state.awayScore;
+          return h >= 1 && a >= 1;
+        };
+      }
+    }
+
+    if (marketKey === 'MS') {
+      return (state) => {
+        if (!state.isFinished) return false;
+        if (targetTeam === 'HOME' || selection.includes('MS 1')) return state.homeScore <= state.awayScore;
+        if (targetTeam === 'AWAY' || selection.includes('MS 2')) return state.awayScore <= state.homeScore;
+        if (targetTeam === 'DRAW' || selection.includes('MS X')) return state.homeScore !== state.awayScore;
+        return false;
+      };
+    }
+
+    if (marketKey === 'NEXT_GOAL') {
+      return (state) => {
+        const trigH = state.triggerHomeScore ?? 0;
+        const trigA = state.triggerAwayScore ?? 0;
+        const trigTot = trigH + trigA;
+        if (selection.includes('Ev Sahibi') || targetTeam === 'HOME') {
+          return (state.awayScore > trigA && state.homeScore === trigH) || (state.isFinished && state.totalGoals === trigTot);
+        }
+        if (selection.includes('Deplasman') || targetTeam === 'AWAY') {
+          return (state.homeScore > trigH && state.awayScore === trigA) || (state.isFinished && state.totalGoals === trigTot);
+        }
+        if (selection.includes('Gol Olmaz') || targetTeam === 'NONE') {
+          return state.totalGoals > trigTot;
+        }
+        return false;
+      };
+    }
+
+    return () => false;
+  }
+}
 
 class QuantSignalEngine {
   constructor() {
@@ -182,7 +375,7 @@ class QuantSignalEngine {
   /**
    * Goalkeeper Resistance Index (GRI):
    * When opposing goalkeeper records >= 4 saves or save rate >= 85% despite continuous high-danger shots,
-   * measures whether this is unsustainable variance (mean reversion goal imminent, +18% next goal edge)
+   * measures whether this is unsustainable variance (mean reversion goal imminent, tactical conviction boost)
    * or total impenetrable wall (adjusting conviction downwards).
    */
   computeGoalkeeperResistanceIndex(attStats = {}, oppStats = {}, attScore = 0, oppScore = 0, attD5 = {}, attD10 = {}) {
@@ -233,10 +426,10 @@ class QuantSignalEngine {
         saveCount: oppSaves,
         saveRate: Number((saveRate * 100).toFixed(1)),
         isMeanReversionImminent: true,
-        lambdaBoost: 1.18, // +18% next goal edge
-        edgeBonus: 18.0,
+        lambdaBoost: 1.18, // Tactical pressure boost for high-danger siege
+        edgeBonus: 0,
         convictionMult: 1.12,
-        summary: `Kaleci Direnci Aşırı Varyans: Rakip kaleci ${oppSaves} kurtarışla (%${Math.round(saveRate * 100)} kurtarış yüzdesi) dirense de yoğun ceza sahası baskısı ve yüksek xG borcu sürüyor. Bu durum sürdürülemez varyanstır; ortalamaya dönüş (mean reversion) ile sıradaki gol an meselesidir (+%18 Değer Avantajı).`
+        summary: `Kaleci Direnci Aşırı Varyans: Rakip kaleci ${oppSaves} kurtarışla (%${Math.round(saveRate * 100)} kurtarış yüzdesi) dirense de yoğun ceza sahası baskısı ve yüksek xG borcu sürüyor. Bu durum sürdürülemez varyanstır; ortalamaya dönüş (mean reversion) ile sıradaki gol an meselesidir.`
       };
     }
 
@@ -250,7 +443,7 @@ class QuantSignalEngine {
       saveRate: Number((saveRate * 100).toFixed(1)),
       isMeanReversionImminent: false,
       lambdaBoost: 0.92, // Damped attacking expectation
-      edgeBonus: -5.0,
+      edgeBonus: 0,
       convictionMult: 0.88,
       summary: `Geçilmez Kaleci Duvarı: Kaleci ${oppSaves} kurtarış (%${Math.round(saveRate * 100)}) ile yüksek odak seviyesinde; hücumlar ceza sahası dışından cılız kaldığı için savunma hattı güven veriyor.`
     };
@@ -473,7 +666,91 @@ class QuantSignalEngine {
     return Number(this.clamp(0.76, 1.45, qPos).toFixed(3));
   }
 
-  derivePriorLambdas(odds) {
+  /**
+   * Numerical inverse solver for Poisson Under 2.5 goal line:
+   * P(Goals <= 2) = e^(-lambda) * (1 + lambda + lambda^2 / 2)
+   * Inverts market implied Under 2.5 probability to infer total match goal expectancy lambda_total in [1.80, 4.00].
+   */
+  solveLambdaFromUnder25(pUnder) {
+    let low = 1.60;
+    let high = 4.40;
+    for (let iter = 0; iter < 32; iter++) {
+      const mid = (low + high) / 2;
+      const pMid = Math.exp(-mid) * (1 + mid + (mid * mid) / 2);
+      if (pMid > pUnder) {
+        low = mid;
+      } else {
+        high = mid;
+      }
+    }
+    const lambda = (low + high) / 2;
+    return this.clamp(1.80, 4.00, Number(lambda.toFixed(3)));
+  }
+
+  /**
+   * Calibrates baseline total goal expectation lambda_total based on league scoring tiers
+   * when market O/U lines are missing:
+   *  - Bundesliga / Eredivisie / Premier League: ~2.88
+   *  - Serie A / Süper Lig / Ligue 1 / MLS: ~2.68
+   *  - LaLiga / Liga Portugal: ~2.55
+   *  - Default: 2.66
+   */
+  getLeaguePriorTotalGoals(match = {}) {
+    const l = String(match?.league?.name || match?.leagueName || match?.league || match?.competition || '').toLowerCase().trim();
+    if (!l) return 2.66;
+
+    // Bundesliga / Eredivisie / Premier League: ~2.88
+    if (
+      l.includes('bundesliga') ||
+      l.includes('eredivisie') ||
+      l.includes('premier league') ||
+      l.includes('premier lig') ||
+      l.includes('epl')
+    ) {
+      return 2.88;
+    }
+
+    // Serie A / Süper Lig / Ligue 1 / MLS: ~2.68
+    if (
+      (l.includes('serie a') && !l.includes('brezilya') && !l.includes('brazil')) ||
+      l.includes('süper lig') ||
+      l.includes('super lig') ||
+      l.includes('superlig') ||
+      l.includes('ligue 1') ||
+      l.includes('lig 1') ||
+      l.includes('mls') ||
+      l.includes('major league soccer')
+    ) {
+      return 2.68;
+    }
+
+    // LaLiga / Liga Portugal: ~2.55
+    if (
+      l.includes('la liga') ||
+      l.includes('laliga') ||
+      l.includes('primera division') ||
+      l.includes('portugal') ||
+      l.includes('primeira liga')
+    ) {
+      return 2.55;
+    }
+
+    // Default: 2.66
+    return 2.66;
+  }
+
+  /**
+   * Institutional Market Prior Expectancy (lambda_H, lambda_A):
+   * Derives pre-match goal expectations from market 1X2 odds and dynamic O/U 2.5 calibration:
+   * 1. If 1X2 odds exist (o1, oX, o2):
+   *    - If pre-match O/U 2.5 line is available: solves lambda_total in [1.80, 4.00] from Poisson Under 2.5 inverse (MARKET_OU_CALIBRATED).
+   *    - If O/U odds are missing: calibrates lambda_total from league tier (MARKET_1X2_LEAGUE).
+   *    - Clamps home goal expectancy share: shareH = clamp(0.22, 0.78, 0.5 + (p1 - p2) * 0.59).
+   *    - Returns { priorH, priorA, priorTotal: priorH + priorA, priorCalibration, isFallback: false }.
+   * 2. If 1X2 odds are completely missing:
+   *    - Returns { priorH: 1.40, priorA: 1.15, priorTotal: 2.55, priorCalibration: 'FALLBACK', isFallback: true }.
+   */
+  derivePriorLambdas(odds, match = {}) {
     const o1 = odds?.openMs1 || odds?.ms1;
     const oX = odds?.openMsX || odds?.msX;
     const o2 = odds?.openMs2 || odds?.ms2;
@@ -482,15 +759,54 @@ class QuantSignalEngine {
       const sumInv = (1 / o1) + (1 / oX) + (1 / o2);
       const p1 = (1 / o1) / sumInv;
       const p2 = (1 / o2) / sumInv;
-      const totalGoals = 2.66;
-      const shareH = this.clamp(0.23, 0.77, 0.5 + (p1 - p2) * 0.59);
+      const shareH = this.clamp(0.22, 0.78, 0.5 + (p1 - p2) * 0.59);
+
+      const ou25 = odds?.ouLines?.['2.5'] || odds?.ouLines?.['2.50'];
+      const oOver = ou25?.openOver || ou25?.over;
+      const oUnder = ou25?.openUnder || ou25?.under;
+      const hasOu = Boolean((oOver && oOver > 1.01) || (oUnder && oUnder > 1.01));
+
+      let totalGoals = 2.66;
+      let priorCalibration = 'MARKET_1X2_LEAGUE';
+
+      if (hasOu) {
+        let pUnder = 0.50;
+        if (oOver > 1.01 && oUnder > 1.01) {
+          const invOver = 1 / oOver;
+          const invUnder = 1 / oUnder;
+          pUnder = invUnder / (invOver + invUnder);
+        } else if (oUnder > 1.01) {
+          pUnder = (1 / oUnder) / 1.06;
+        } else if (oOver > 1.01) {
+          const pOver = (1 / oOver) / 1.06;
+          pUnder = 1 - pOver;
+        }
+        pUnder = this.clamp(0.05, 0.95, pUnder);
+        totalGoals = this.solveLambdaFromUnder25(pUnder);
+        priorCalibration = 'MARKET_OU_CALIBRATED';
+      } else {
+        totalGoals = this.getLeaguePriorTotalGoals(match);
+        priorCalibration = 'MARKET_1X2_LEAGUE';
+      }
+
+      const priorH = Number((totalGoals * shareH).toFixed(3));
+      const priorA = Number((totalGoals * (1 - shareH)).toFixed(3));
       return {
-        priorH: Number((totalGoals * shareH).toFixed(3)),
-        priorA: Number((totalGoals * (1 - shareH)).toFixed(3))
+        priorH,
+        priorA,
+        priorTotal: Number((priorH + priorA).toFixed(3)),
+        priorCalibration,
+        isFallback: false
       };
     }
 
-    return { priorH: 1.42, priorA: 1.16 };
+    return {
+      priorH: 1.40,
+      priorA: 1.15,
+      priorTotal: 2.55,
+      priorCalibration: 'FALLBACK',
+      isFallback: true
+    };
   }
 
   /**
@@ -506,12 +822,16 @@ class QuantSignalEngine {
     const isHt = match.status === 'HT';
     const rawMin = isHt ? 45 : (match.minute || 0);
     const t = isScheduled ? 0 : this.clamp(1, 90, rawMin);
-    const { priorH, priorA } = this.derivePriorLambdas(match.odds);
+    const priorInfo = this.derivePriorLambdas(match.odds, match);
+    const { priorH, priorA } = priorInfo;
 
     if (isFinished) {
       return {
         priorH,
         priorA,
+        priorTotal: priorInfo.priorTotal,
+        priorCalibration: priorInfo.priorCalibration,
+        isFallbackPrior: priorInfo.isFallback,
         lambdaRemH: 0.01,
         lambdaRemA: 0.01,
         priorRemH: 0.01,
@@ -522,6 +842,8 @@ class QuantSignalEngine {
         priorHtA: 0,
         momentumH: 1.0,
         momentumA: 1.0,
+        compositeMultiplierH: 1.0,
+        compositeMultiplierA: 1.0,
         qPosH: 1.0,
         qPosA: 1.0,
         hdiH: 0,
@@ -741,19 +1063,26 @@ class QuantSignalEngine {
       }
     }
 
-    // Red Card Dynamic Penalty: rho = 0.55 penalty, +32% opposition boost
-    const hReds = Math.max(match.home.redCards || 0, hS.redCards || 0);
-    const aReds = Math.max(match.away.redCards || 0, aS.redCards || 0);
+    // Non-linear Red Card Dynamics:
+    // Red card impact scales with match minute: early dismissal (min 15) has much greater impact than late dismissal (min 82).
+    // Penalty scale: penaltyFactor = 0.55 + 0.35 * (t / 90)
+    // Diminishing opposition boost for 2+ reds: oppBoost = 1.0 + 0.30 * redDiff^0.8
+    const hReds = Math.max(match.home?.redCards || 0, hS.redCards || 0);
+    const aReds = Math.max(match.away?.redCards || 0, aS.redCards || 0);
     let rhoH = 1.0;
     let rhoA = 1.0;
     if (aReds > hReds) {
       const redDiff = aReds - hReds;
-      rhoH = Number((1.0 + 0.32 * redDiff).toFixed(3)); // +32% opposition boost
-      rhoA = Number((Math.pow(0.55, redDiff)).toFixed(3)); // rho = 0.55 penalty
+      const penaltyFactor = 0.55 + 0.35 * (t / 90);
+      const oppBoost = 1.0 + 0.30 * Math.pow(redDiff, 0.8);
+      rhoH = Number(oppBoost.toFixed(3));
+      rhoA = Number(Math.pow(penaltyFactor, redDiff).toFixed(3));
     } else if (hReds > aReds) {
       const redDiff = hReds - aReds;
-      rhoH = Number((Math.pow(0.55, redDiff)).toFixed(3)); // rho = 0.55 penalty
-      rhoA = Number((1.0 + 0.32 * redDiff).toFixed(3)); // +32% opposition boost
+      const penaltyFactor = 0.55 + 0.35 * (t / 90);
+      const oppBoost = 1.0 + 0.30 * Math.pow(redDiff, 0.8);
+      rhoH = Number(Math.pow(penaltyFactor, redDiff).toFixed(3));
+      rhoA = Number(oppBoost.toFixed(3));
     }
 
     const remRatioFull = isScheduled ? 1.0 : (isHt ? 0.511 : Math.max(0.015, (this.T_FULL - t) / this.T_FULL));
@@ -805,22 +1134,64 @@ class QuantSignalEngine {
     const velWeightH = this.clamp(0.25, 1.35, 0.40 + 0.60 * (shotVelH / Math.max(0.06, avgVelH)));
     const velWeightA = this.clamp(0.25, 1.35, 0.40 + 0.60 * (shotVelA / Math.max(0.06, avgVelA)));
 
-    const staleDecayH = staleMinsH >= 12 ? Math.exp(-0.04 * staleMinsH) : 1.0;
-    const staleDecayA = staleMinsA >= 12 ? Math.exp(-0.04 * staleMinsA) : 1.0;
+    // xG Debt Bounding & Window Coverage Verification:
+    // If window coverage < 0.4, damp xG debt boost proportionally.
+    // Stale decay: if no shots occurred recently (staleMins >= 20), zero out debt boost completely.
+    const covH = windows?.delta10?.home?._meta?.coverage ?? windows?.delta10?.home?.coverage ?? 1.0;
+    const covA = windows?.delta10?.away?._meta?.coverage ?? windows?.delta10?.away?.coverage ?? 1.0;
+    const covFactorH = covH < 0.4 ? Math.max(0, covH / 0.4) : 1.0;
+    const covFactorA = covA < 0.4 ? Math.max(0, covA / 0.4) : 1.0;
+
+    let staleDecayH = 1.0;
+    if (staleMinsH >= 20) {
+      staleDecayH = 0;
+    } else if (staleMinsH >= 10) {
+      staleDecayH = Math.max(0, Math.exp(-0.08 * (staleMinsH - 10)));
+    }
+
+    let staleDecayA = 1.0;
+    if (staleMinsA >= 20) {
+      staleDecayA = 0;
+    } else if (staleMinsA >= 10) {
+      staleDecayA = Math.max(0, Math.exp(-0.08 * (staleMinsA - 10)));
+    }
 
     if (!isScheduled && t >= 16 && t < 74) {
       if (xgDebtH >= 0.48 && (mH >= 1.02 || igpH >= 48 || (effD10H.shotsOnTarget || 0) >= 1 || (effD10H.corners || 0) >= 2)) {
         const rawBoostH = 0.36 * (xgDebtH - 0.38) * remRatioFull * qPosH * Math.max(0.85, igpH / 50);
-        debtBoostH = this.clamp(0, 0.48, rawBoostH * velWeightH * staleDecayH);
+        debtBoostH = this.clamp(0, 0.48, rawBoostH * velWeightH * staleDecayH * covFactorH);
       }
       if (xgDebtA >= 0.48 && (mA >= 1.02 || igpA >= 48 || (effD10A.shotsOnTarget || 0) >= 1 || (effD10A.corners || 0) >= 2)) {
         const rawBoostA = 0.36 * (xgDebtA - 0.38) * remRatioFull * qPosA * Math.max(0.85, igpA / 50);
-        debtBoostA = this.clamp(0, 0.48, rawBoostA * velWeightA * staleDecayA);
+        debtBoostA = this.clamp(0, 0.48, rawBoostA * velWeightA * staleDecayA * covFactorA);
       }
     }
 
-    const coreLambdaRemH = baseRateH * remRatioFull * omega * mH * burst5H * ccsmBoostH * lgvBoostH * griBoostH * hlovBoostH * gammaStateH * rhoH * pMultH * tMultH;
-    const coreLambdaRemA = baseRateA * remRatioFull * omega * mA * burst5A * ccsmBoostA * lgvBoostA * griBoostA * hlovBoostA * gammaStateA * rhoA * pMultA * tMultA;
+    // Orthogonalized Pressure Intensity Formulation:
+    // Prevents heuristic double-counting by grouping tactical signals into 4 orthogonal dimensions:
+    // 1. Momentum / Shot Pace: Delta_M = (m - 1.0) + 0.6 * (burst5 - 1.0)
+    // 2. Set-piece Pressure:   Delta_Set = ccsmBoost - 1.0
+    // 3. Tactical Exploitation: Delta_Tact = (griBoost - 1.0) + (hlovBoost - 1.0)
+    // 4. Late-Game Context:    Delta_Late = lgvBoost - 1.0
+    // Sub-linear diminishing returns via tanh:
+    // Delta_Total = tanh(Delta_M * 0.65 + Delta_Set * 0.50 + Delta_Tact * 0.45 + Delta_Late * 0.50)
+    // compositeMultiplier = clamp(0.65, 1.75, 1.0 + Delta_Total)
+    const deltaMH = (mH - 1.0) + 0.6 * (burst5H - 1.0);
+    const deltaSetH = ccsmBoostH - 1.0;
+    const deltaTactH = (griBoostH - 1.0) + (hlovBoostH - 1.0);
+    const deltaLateH = lgvBoostH - 1.0;
+    const deltaTotalH = Math.tanh(deltaMH * 0.65 + deltaSetH * 0.50 + deltaTactH * 0.45 + deltaLateH * 0.50);
+    const compositeMultiplierH = Number(this.clamp(0.65, 1.75, 1.0 + deltaTotalH).toFixed(3));
+
+    const deltaMA = (mA - 1.0) + 0.6 * (burst5A - 1.0);
+    const deltaSetA = ccsmBoostA - 1.0;
+    const deltaTactA = (griBoostA - 1.0) + (hlovBoostA - 1.0);
+    const deltaLateA = lgvBoostA - 1.0;
+    const deltaTotalA = Math.tanh(deltaMA * 0.65 + deltaSetA * 0.50 + deltaTactA * 0.45 + deltaLateA * 0.50);
+    const compositeMultiplierA = Number(this.clamp(0.65, 1.75, 1.0 + deltaTotalA).toFixed(3));
+
+    const coreLambdaRemH = baseRateH * remRatioFull * omega * compositeMultiplierH * gammaStateH * rhoH * pMultH * tMultH;
+    const coreLambdaRemA = baseRateA * remRatioFull * omega * compositeMultiplierA * gammaStateA * rhoA * pMultA * tMultA;
 
     // Time-proportional realism cap: remaining goals scale with remaining time
     // (max ~2.4 goals/90 per team and ~3.4 goals/90 combined, even under heavy pressure)
@@ -849,6 +1220,9 @@ class QuantSignalEngine {
     return {
       priorH,
       priorA,
+      priorTotal: priorInfo.priorTotal,
+      priorCalibration: priorInfo.priorCalibration,
+      isFallbackPrior: priorInfo.isFallback,
       lambdaRemH,
       lambdaRemA,
       priorRemH,
@@ -859,6 +1233,8 @@ class QuantSignalEngine {
       priorHtA,
       momentumH: Number(mH.toFixed(2)),
       momentumA: Number(mA.toFixed(2)),
+      compositeMultiplierH,
+      compositeMultiplierA,
       qPosH,
       qPosA,
       hdiH,
@@ -1035,36 +1411,61 @@ class QuantSignalEngine {
   }
 
   /**
-   * Classify Conviction Score (0-100) into Tier Badges
-   */
-  /**
    * Classify Conviction Score (0-100) into Tier Badges:
-   * Requires genuine market odds before issuing quantitative +EV value signal tier badges.
+   * Strict separation of VALUE_SIGNAL vs MODEL_SIGNAL.
+   * If signalType === 'VALUE_SIGNAL':
+   *   - convictionScore >= 82 && evPct >= 6.0 -> ELİT DEĞER SİNYALİ (A+)
+   *   - convictionScore >= 75 && evPct >= 3.0 -> DEĞER SİNYALİ (A)
+   *   - default -> DEĞER SİNYALİ (B+)
+   * If signalType === 'MODEL_SIGNAL':
+   *   - convictionScore >= 82 -> ELİT MODEL TAHMİNİ (A+)
+   *   - convictionScore >= 75 -> GÜÇLÜ MODEL TAHMİNİ (A)
+   *   - default -> MODEL TAHMİNİ (B+)
    */
-  classifySignalTier(convictionScore, edgePct, hasRealOdds = true) {
-    if (convictionScore >= 82 && edgePct >= 6.5 && edgePct <= 28) {
+  classifySignalTier(convictionScore, evPct = null, hasRealOdds = true, signalType = null) {
+    const type = signalType || (hasRealOdds && (evPct != null && evPct >= 3.0) ? 'VALUE_SIGNAL' : 'MODEL_SIGNAL');
+    if (type === 'VALUE_SIGNAL') {
+      if (convictionScore >= 82 && evPct != null && evPct >= 6.0) {
+        return {
+          signalTier: 'ELITE_A_PLUS',
+          tierBadge: 'ELİT DEĞER SİNYALİ (A+)'
+        };
+      }
+      if (convictionScore >= 75 && evPct != null && evPct >= 3.0) {
+        return {
+          signalTier: 'STRONG_A',
+          tierBadge: 'DEĞER SİNYALİ (A)'
+        };
+      }
       return {
-        signalTier: 'ELITE_A_PLUS',
-        tierBadge: hasRealOdds ? 'ELİT SİNYAL (A+)' : 'ELİT MODEL (A+)'
+        signalTier: 'VALUE_B_PLUS',
+        tierBadge: 'DEĞER SİNYALİ (B+)'
+      };
+    } else {
+      if (convictionScore >= 82) {
+        return {
+          signalTier: 'ELITE_A_PLUS',
+          tierBadge: 'ELİT MODEL TAHMİNİ (A+)'
+        };
+      }
+      if (convictionScore >= 75) {
+        return {
+          signalTier: 'STRONG_A',
+          tierBadge: 'GÜÇLÜ MODEL TAHMİNİ (A)'
+        };
+      }
+      return {
+        signalTier: 'MODEL_B_PLUS',
+        tierBadge: 'MODEL TAHMİNİ (B+)'
       };
     }
-    if (convictionScore >= 76 && edgePct >= 4.5) {
-      return {
-        signalTier: 'STRONG_A',
-        tierBadge: hasRealOdds ? 'GÜÇLÜ SİNYAL (A)' : 'GÜÇLÜ MODEL (A)'
-      };
-    }
-    return {
-      signalTier: hasRealOdds ? 'VALUE_B_PLUS' : 'MODEL_B_PLUS',
-      tierBadge: hasRealOdds ? 'DEĞER SİNYALİ (B+)' : 'MODEL SİNYALİ (B+)'
-    };
   }
 
   /**
    * Full Audit Gatekeeper:
    * Strictly validates match status, minute cutoffs, settled markets, red cards, and score-state rules.
    */
-  isMarketAllowedByScoreAndTime(marketKey, selection, match, lambdas, windows) {
+  isMarketAllowedByScoreAndTime(marketKey, selection, match, lambdas, windows, marketDefinition = null) {
     const status = String(match.status || '').toUpperCase();
     const isHt = status === 'HT';
     const isLive = status === 'LIVE';
@@ -1103,9 +1504,7 @@ class QuantSignalEngine {
     // On 1-1 ties, Over 3.5 is strictly prohibited; only Over 2.5 is permitted!
     if (gH === 1 && gA === 1) {
       if (selection.includes('Üst')) {
-        let lineVal = null;
-        const matchLine = selection.match(/(\d+\.?\d*)\s*Üst/i) || selection.match(/(\d+\.?\d*)/);
-        if (matchLine) lineVal = parseFloat(matchLine[1]);
+        const lineVal = marketDefinition ? marketDefinition.line : MarketDefinition.parseLine(selection, 2.5);
         if (lineVal !== null && lineVal > 2.5) {
           return false; // STRICTLY FORBIDDEN: Over 3.5+ prohibited on 1-1 ties
         }
@@ -1128,17 +1527,17 @@ class QuantSignalEngine {
     // tuzak bahisler KESİNLİKLE ENGELLENMELİDİR (return false;)!
     // needed <= 0 ise çizgi zaten gelmiştir / kapanmıştır.
     if (selection.includes('Üst') && (marketKey === 'OU' || marketKey === 'HT_OU')) {
-      const lineVal = parseFloat((selection.match(/(\d+\.5)/) || [])[1] || '0');
-      const needed = Math.ceil(lineVal - gTot);
+      const lineVal = marketDefinition ? marketDefinition.line : MarketDefinition.parseLine(selection, 2.5);
+      const needed = Math.floor(lineVal + 1e-4) + 1 - gTot;
       // Erken dakikalarda (t <= 25) 0-0 giden yüksek tempolu maçta açılan 1.5 Üst hariç, canlıda daima needed === 1 olmalıdır
-      const isEarlyZeroZero = (gTot === 0 && lineVal === 1.5 && t <= 25);
+      const isEarlyZeroZero = (gTot === 0 && lineVal <= 1.5 && t <= 25);
       if (!isEarlyZeroZero && needed >= 2) return false;
       if (needed <= 0) return false;
     }
 
     // Alt marketi güvenlik kilidi: Halihazırda aşılmış çizgiler (lineVal <= gTot) canlıda derhal reddedilir
     if (selection.includes('Alt') && (marketKey === 'OU' || marketKey === 'HT_OU')) {
-      const lineVal = parseFloat((selection.match(/(\d+\.5)/) || [])[1] || '0');
+      const lineVal = marketDefinition ? marketDefinition.line : MarketDefinition.parseLine(selection, 2.5);
       if (lineVal <= gTot) return false;
     }
 
@@ -1154,11 +1553,8 @@ class QuantSignalEngine {
         if (gTot === 1 && t > 28) return false;
         if (selection.includes('Üst')) {
           if ((lambdas.lambdaHtH + lambdas.lambdaHtA) < 0.56) return false;
-          let parsedLine = null;
-          const matchLine = selection.match(/(\d+\.?\d*)\s*Üst/i) || selection.match(/(\d+\.?\d*)/);
-          if (matchLine) parsedLine = parseFloat(matchLine[1]);
-          const lineVal = parsedLine ?? 1.5;
-          const neededGoals = (Math.floor(lineVal) + 1) - gTot;
+          const lineVal = marketDefinition ? marketDefinition.line : MarketDefinition.parseLine(selection, 1.5);
+          const neededGoals = Math.floor(lineVal + 1e-4) + 1 - gTot;
           if (neededGoals >= 2) return false;
         }
       }
@@ -1204,11 +1600,8 @@ class QuantSignalEngine {
           // SIGNAL SAFETY GATEKEEPER:
           // Skoru ne olursa olsun (özellikle 1-1 iken), kazanması için 2+ gol gereken bir "Üst' sinyali KESİNLİKLE YASAKTIR!
           // (Örn: skor 1-1 iken 3.5 Üst, skor 2-1 iken 4.5 Üst, skor 0-0 iken 2.5 Üst)
-          let parsedLine = null;
-          const matchLine = selection.match(/(\d+\.?\d*)\s*Üst/i) || selection.match(/(\d+\.?\d*)/);
-          if (matchLine) parsedLine = parseFloat(matchLine[1]);
-          const lineVal = parsedLine ?? 2.5;
-          const neededGoals = (Math.floor(lineVal) + 1) - gTot;
+          const lineVal = marketDefinition ? marketDefinition.line : MarketDefinition.parseLine(selection, 2.5);
+          const neededGoals = Math.floor(lineVal + 1e-4) + 1 - gTot;
           if (neededGoals >= 2) return false;
 
           // 2-0 / 0-2 score: Over signal locked at t >= 52
@@ -1333,36 +1726,39 @@ class QuantSignalEngine {
       };
     }
 
-    if (totShots < 3 && ((hS.corners || 0) + (aS.corners || 0)) < 2 && minute < 18) {
-      return {
-        signalStatus: 'NO_SIGNAL',
-        statusBadge: 'Veri Toplanıyor',
-        reason: 'Maçta henüz anlamlı bir şut veya baskı istatistiği oluşmadı. Yanıltıcı sinyal üretmemek için izleniyor.',
-        activeSignals: []
-      };
-    }
-
     // Data-feed gate: many lower leagues publish NO live statistics. Missing data must never be read as "low tempo'.
     const totCorners = (hS.corners || 0) + (aS.corners || 0);
     const totFoulsAll = (hS.fouls || 0) + (aS.fouls || 0);
-    const hasStatsFeed = Boolean(match._statsHydrated) && (totShots + totCorners + totFoulsAll) >= 6;
+    const hasStatsFeed = Boolean(match._statsHydrated) && (totShots + totCorners + totFoulsAll) >= 4;
     if (!hasStatsFeed || arch === 'LIMITED_DATA') {
       return {
-        signalStatus: 'NO_SIGNAL',
+        signalStatus: 'DATA_INSUFFICIENT',
         statusBadge: 'Sınırlı Veri',
         reason: 'Bu maç için canlı istatistik yayınlanmıyor. Yalnızca skor ve olaylar takip ediliyor; veri olmadan sinyal üretilmez.',
         activeSignals: []
       };
     }
 
-    // Minimum evidence gate: never fire a signal on a statistically thin sample (applies at every minute)
-    const sampleSize = totShots + 0.5 * totCorners;
-    const minSample = Math.max(7, Math.round(minute * 0.14));
-    if (sampleSize < minSample) {
+    // Multi-dimensional Data Adequacy Gating:
+    // Multi-factor verification: totalShots >= 3, shotsOnTarget >= 1, windowCoverage >= 0.45, clockVerified (minute >= 10 and not stale)
+    const windowCoverage = windows?.coverage ?? windows?.windowCoverage ?? windows?.meta?.windowCoverage ?? (
+      windows?.delta10 ? 1.0 : (windows?.delta5 ? 0.6 : 0.0)
+    );
+    const isStale = Boolean(match.updatedAt && (Date.now() - match.updatedAt > 180000));
+    const clockVerified = (match.status === 'HT' || (minute >= 10 && minute < 85)) && !isStale;
+
+    const isDataAdequate = (
+      totShots >= 3 &&
+      totSot >= 1 &&
+      windowCoverage >= 0.45 &&
+      clockVerified
+    );
+
+    if (!isDataAdequate) {
       return {
-        signalStatus: 'NO_SIGNAL',
-        statusBadge: 'Veri Toplanıyor',
-        reason: `Yeterli şut verisi yok (${totShots} şut, ${totCorners} korner). Güvenilir sinyal için veri birikmesi bekleniyor.`,
+        signalStatus: 'DATA_INSUFFICIENT',
+        statusBadge: 'Veri Yetersiz',
+        reason: `Çok boyutlu veri yeterlilik kontrolü: Yeterli şut (${totShots}/3), isabet (${totSot}/1), pencere kapsamı (%${Math.round(windowCoverage * 100)}/45%) veya saat doğrulaması (${clockVerified ? 'Geçerli' : 'Geçersiz'}) sağlanamadı. Güvenilir model tahmini için veri birikmesi bekleniyor.`,
         activeSignals: []
       };
     }
@@ -1489,7 +1885,7 @@ class QuantSignalEngine {
       if (!group || !Array.isArray(group.options)) continue;
 
       for (const opt of group.options) {
-        if (!this.isMarketAllowedByScoreAndTime(key, opt.selection, match, lambdas, windows)) {
+        if (!this.isMarketAllowedByScoreAndTime(key, opt.selection, match, lambdas, windows, opt.marketDefinition)) {
           continue;
         }
 
@@ -1498,11 +1894,7 @@ class QuantSignalEngine {
         // 1-1 Draw Guard: Over 3.5 is strictly prohibited on 1-1 ties; only Over 2.5 is permitted
         if (match.home.score === 1 && match.away.score === 1) {
           if (sel.includes('Üst')) {
-            let lineVal = opt.line;
-            if (lineVal == null) {
-              const matchLine = sel.match(/(\d+\.?\d*)\s*Üst/i) || sel.match(/(\d+\.?\d*)/);
-              lineVal = matchLine ? parseFloat(matchLine[1]) : 2.5;
-            }
+            const lineVal = opt.line ?? MarketDefinition.parseLine(sel, 2.5);
             if (lineVal > 2.5) {
               continue; // Strictly prohibited on 1-1 ties
             }
@@ -1527,6 +1919,9 @@ class QuantSignalEngine {
           matchesDir = sel.includes('Alt') || sel.includes('KG Yok') || sel.includes('Gol Olmaz');
         }
 
+        const modelProb = opt.modelProbability ?? opt.modelProbPct ?? 0;
+        const convScore = opt.convictionScore ?? opt.confidence ?? 0;
+
         // Under / defensive picks need POSITIVE evidence of a dead game, not just an absence of data
         const isUnderPick = sel.includes('Alt') || sel.includes('KG Yok') || sel.includes('Gol Olmaz');
         let underEvidenceOk = true;
@@ -1542,30 +1937,37 @@ class QuantSignalEngine {
             sot10 <= 1 &&
             Math.max(flow.igpHome || 0, flow.igpAway || 0) <= 42 &&
             paceCode !== 'HIGH_FLOW' && paceCode !== 'SET_PIECE_CHAOS' &&
-            opt.modelProbPct >= 62 &&
-            opt.confidence >= 74 + (this.adaptiveBonus || 0);
+            modelProb >= 62 &&
+            convScore >= 74 + (this.adaptiveBonus || 0);
         }
 
-        // Alt signals strictly require modelProbPct >= 62 and confidence >= 74
-        if (sel.includes('Alt') && (opt.modelProbPct < 62 || opt.confidence < 74)) {
+        // Alt signals strictly require modelProbability >= 62 and convictionScore >= 74
+        if (sel.includes('Alt') && (modelProb < 62 || convScore < 74)) {
           continue;
         }
 
         if (
           matchesDir &&
           underEvidenceOk &&
-          opt.confidence >= Math.max(74, 74 + (this.adaptiveBonus || 0)) &&
-          opt.modelProbPct >= 48 &&
+          convScore >= Math.max(74, 74 + (this.adaptiveBonus || 0)) &&
+          modelProb >= 48 &&
           opt.edgePct >= 4.2 &&
           opt.edgePct <= 28.0 &&
           opt.marketOdds >= 1.35 &&
           opt.marketOdds <= 4.20 &&
           (opt.evPct == null || opt.evPct >= 3.0)
         ) {
+          const sniperScore = Number((
+            (opt.signalType === 'VALUE_SIGNAL' ? 15 : 0) +
+            (convScore * 0.70) +
+            (modelProb * 0.30) +
+            ((opt.evPct || 0) * 0.80)
+          ).toFixed(2));
+
           candidates.push({
             ...opt,
             archetypeLabel: effectiveArchetypeLabel,
-            sniperScore: opt.convictionScore + (opt.edgePct * 1.85) + ((opt.evPct || 0) * 0.5)
+            sniperScore
           });
         }
       }
@@ -1586,13 +1988,13 @@ class QuantSignalEngine {
 
     const selected = [candidates[0]];
     for (let i = 1; i < candidates.length; i++) {
-      if (candidates[i].marketKey !== selected[0].marketKey && candidates[i].confidence >= 74) {
+      if (candidates[i].marketKey !== selected[0].marketKey && (candidates[i].convictionScore ?? candidates[i].confidence) >= 74) {
         selected.push(candidates[i]);
         break;
       }
     }
 
-    const topTierBadge = selected[0].tierBadge || (selected[0].hasRealOdds ? 'DEĞER SİNYALİ (B+)' : 'MODEL SİNYALİ (B+)');
+    const topTierBadge = selected[0].tierBadge || (selected[0].signalType === 'VALUE_SIGNAL' ? 'DEĞER SİNYALİ (B+)' : 'MODEL TAHMİNİ (B+)');
     const htSuffix = match.status === 'HT' ? ' • 2. Yarı Hedefi' : '';
 
     return {
@@ -1654,6 +2056,8 @@ class QuantSignalEngine {
       marketTitle,
       selection,
       line = null,
+      targetTeam = null,
+      marketDefinition = null,
       pModel,
       pPrior,
       marketOdds,
@@ -1710,21 +2114,20 @@ class QuantSignalEngine {
         ? Number(marketOdds.toFixed(2))
         : Number(this.clamp(1.02, 65.00, calculatedLiveOdds).toFixed(2));
 
-      // Institutional Expected Value (+EV) Calculation:
-      // When genuine live market odds are available, EV% = (p_model * O_market - 1) * 100
-      // When relying on synthetic odds, eliminate false/speculative +EV claims by setting evPct: null and isSyntheticOdds: true
+      // Strict Separation of Edge, EV, and Conviction Metrics:
+      const modelProbability = Number((pMod * 100).toFixed(1));
+      const marketProbability = hasRealOdds ? Number((fairMarketProb * 100).toFixed(1)) : null;
+      const marketEdgePp = hasRealOdds ? Number(((pMod - fairMarketProb) * 100).toFixed(1)) : null;
+      const priorDeltaPp = Number(((pMod - pPri) * 100).toFixed(1));
       const evPct = hasRealOdds
         ? Number(((pMod * displayMarketOdds - 1) * 100).toFixed(1))
         : null;
       const isSyntheticOdds = !hasRealOdds;
 
-      // Goalkeeper Resistance Index (GRI) Edge & Conviction Multipliers:
-      let griEdgeBonus = 0;
+      // Goalkeeper Resistance Index (GRI) Conviction Multipliers:
       let griConvictionMult = 1.0;
       if (relGri && relGri.active) {
         if (relGri.regime === 'UNSUSTAINABLE_VARIANCE') {
-          // Unsustainable Variance: opposing goalkeeper facing acute post-shot xG debt (+18% next goal edge)
-          griEdgeBonus = relGri.edgeBonus || 18.0;
           griConvictionMult = relGri.convictionMult || 1.12;
         } else if (relGri.regime === 'IMPENETRABLE_WALL') {
           griConvictionMult = relGri.convictionMult || 0.88;
@@ -1735,7 +2138,7 @@ class QuantSignalEngine {
       const edgeVsPrior = pMod - pPri;
       const hybridEdge = hasRealOdds ? (0.65 * edgeVsMarket + 0.35 * edgeVsPrior) : edgeVsPrior;
       const rawEdgePct = Number((hybridEdge * 100).toFixed(1));
-      const edgePct = Number((rawEdgePct + (griEdgeBonus > 0 ? (griEdgeBonus * 0.18) : 0)).toFixed(1));
+      const edgePct = rawEdgePct;
 
       // V5 5-Pillar Conviction Score (0-100):
       // 1. Value Edge & Model Probability Floor (28%)
@@ -1751,8 +2154,6 @@ class QuantSignalEngine {
       const { oddsDropPct, steamScore } = this.getOddsDropInfo(odds, marketKey, selection, edgeVsPrior);
 
       // 1-1 High Conviction Desk Adjustment:
-      // Dakika 55-72 arasında skor 1-1 iken tek gol gerektiren 2.5 Üst ve Sıradaki Gol marketlerinde
-      // ceza sahası şutları ve hücum baskısı patlamışsa ikna skoruna ek trader desteği verilir (%75+)
       let deskConvictionBonus = 0;
       if (gH === 1 && gA === 1 && minute >= 55 && minute <= 72 && (marketKey === 'OU' || marketKey === 'NEXT_GOAL')) {
         if (selection.includes('Üst') || selection.includes('Sıradaki Gol')) {
@@ -1764,7 +2165,15 @@ class QuantSignalEngine {
         }
       }
 
-      const allowed = this.isMarketAllowedByScoreAndTime(marketKey, selection, match, lambdas, windows);
+      const mDef = marketDefinition || new MarketDefinition({
+        marketKey,
+        line,
+        period: isFirstHalfOnly ? 'HT' : 'FT',
+        selection,
+        targetTeam
+      });
+
+      const allowed = this.isMarketAllowedByScoreAndTime(marketKey, selection, match, lambdas, windows, mDef);
       const rawConviction = isScheduled
         ? Math.round(pMod * 100)
         : Math.round(
@@ -1778,7 +2187,9 @@ class QuantSignalEngine {
 
       const convictionScore = allowed ? this.clamp(0, 99, rawConviction) : (isScheduled ? rawConviction : 0);
       const confidence = convictionScore;
-      const { signalTier, tierBadge } = this.classifySignalTier(convictionScore, edgePct, hasRealOdds);
+
+      const signalType = hasRealOdds && (evPct != null && evPct >= 3.0) ? 'VALUE_SIGNAL' : 'MODEL_SIGNAL';
+      const { signalTier, tierBadge } = this.classifySignalTier(convictionScore, evPct, hasRealOdds, signalType);
 
       const urgency = (allowed && convictionScore >= 82 && hybridEdge >= 0.06)
         ? 'CRITICAL'
@@ -1788,25 +2199,32 @@ class QuantSignalEngine {
         marketKey,
         marketTitle,
         selection,
-        line,
-        modelProbPct: Number((pMod * 100).toFixed(1)),
-        marketProbPct: Number((pMarket * 100).toFixed(1)),
+        line: mDef.line,
+        marketDefinition: mDef,
+        modelProbability,
+        marketProbability,
+        marketEdgePp,
+        priorDeltaPp,
+        evPct,
+        convictionScore,
+        signalType,
+        signalTier,
+        tierBadge,
+        // Backward-compatibility properties:
+        modelProbPct: modelProbability,
+        marketProbPct: marketProbability != null ? marketProbability : Number((pPri * 100).toFixed(1)),
         fairMarketProbPct: Number((fairMarketProb * 100).toFixed(1)),
         edgePct,
-        evPct,
         fairOdds,
         marketOdds: displayMarketOdds,
         hasRealOdds,
         isSyntheticOdds,
         oddsDropPct,
         confidence,
-        convictionScore,
-        signalTier,
-        tierBadge,
         allowedByState: allowed,
         urgency,
         isActiveWindow: isFirstHalfOnly ? lambdas.isFirstHalfActive : (match.status === 'LIVE' && minute < 75),
-        reasoning: typeof reasonBuilder === 'function' ? reasonBuilder(displayMarketOdds) : ''
+        reasoning: typeof reasonBuilder === 'function' ? reasonBuilder(displayMarketOdds, convictionScore, modelProbability) : ''
       };
     };
 
@@ -1862,39 +2280,45 @@ class QuantSignalEngine {
     const msOptions = [
       evaluateOption({
         marketKey: 'MS', marketTitle: 'MS (Maç Sonucu)', selection: 'MS 1 (Ev Sahibi)',
+        targetTeam: 'HOME',
+        marketDefinition: new MarketDefinition({ marketKey: 'MS', period: 'FT', selection: 'MS 1 (Ev Sahibi)', targetTeam: 'HOME' }),
         pModel: modelProbs.ms1, pPrior: priorProbs.ms1,
         marketOdds: odds.ms1, allMarketOdds: [odds.ms1, odds.msX, odds.ms2],
         relMomentum: lambdas.momentumH * lambdas.burst5H, relIgp: flow.igpHome,
         relQuality: lambdas.qPosH, relXgDebt: lambdas.xgDebtH,
         relGri: lambdas.griA, relPce: lambdas.pceH, relHlov: lambdas.hlovA,
-        reasonBuilder: () => {
+        reasonBuilder: (dOdds, cScore, mProb) => {
           const isHt = match.status === 'HT';
           const pfx = isHt ? 'İlk yarıda ceza sahası içinden' : 'Son 10 dakikada';
           const shotInfo = isHt ? `${boxH} şut bularak ${(hStats.xg || 0).toFixed(2)} xG üretti (${hStats.shotsOnTarget || 0} isabet)` : `${d10ShotsH} şut ve ${d10CorH} korner üretti (Ceza sahası: ${boxH})`;
-          return `Ceza Sahası Kuşatması: ${match.home.name} ${pfx} ${shotInfo}. Deplasman savunması geriye yaslandı; galibiyet üstünlüğü kaçınılmaz (Hedef: MS 1 / %${Math.round(modelProbs.ms1 * 100)} Güven).`;
+          return `Ceza Sahası Kuşatması: ${match.home.name} ${pfx} ${shotInfo}. Deplasman savunması geriye yaslandı; galibiyet üstünlüğü kaçınılmaz (Hedef: MS 1 / %${mProb || Math.round(modelProbs.ms1 * 100)} Model Olasılığı • İkna: ${cScore}/100).`;
         }
       }),
       evaluateOption({
         marketKey: 'MS', marketTitle: 'MS (Maç Sonucu)', selection: 'MS X (Beraberlik)',
+        targetTeam: 'DRAW',
+        marketDefinition: new MarketDefinition({ marketKey: 'MS', period: 'FT', selection: 'MS X (Beraberlik)', targetTeam: 'DRAW' }),
         pModel: modelProbs.msX, pPrior: priorProbs.msX,
         marketOdds: odds.msX, allMarketOdds: [odds.ms1, odds.msX, odds.ms2],
         relMomentum: 1.05 - Math.abs(lambdas.momentumH - lambdas.momentumA), relIgp: 100 - Math.abs(flow.igpHome - flow.igpAway),
         relQuality: 1.0, relXgDebt: 0.2,
         relGri: null, relPce: null, relHlov: null,
-        reasonBuilder: () => `Taktiksel Kilit & Beraberlik: Takımların oyun üretimi dengede seyrediyor (Ev ${hStats.totalShots || 0} şut - Dep ${aStats.totalShots || 0} şut); beraberlik olasılığı %${Math.round(modelProbs.msX * 100)} seviyesinde.`
+        reasonBuilder: (dOdds, cScore, mProb) => `Taktiksel Kilit & Beraberlik: Takımların oyun üretimi dengede seyrediyor (Ev ${hStats.totalShots || 0} şut - Dep ${aStats.totalShots || 0} şut); beraberlik olasılığı %${mProb || Math.round(modelProbs.msX * 100)} (İkna: ${cScore}/100).`
       }),
       evaluateOption({
         marketKey: 'MS', marketTitle: 'MS (Maç Sonucu)', selection: 'MS 2 (Deplasman)',
+        targetTeam: 'AWAY',
+        marketDefinition: new MarketDefinition({ marketKey: 'MS', period: 'FT', selection: 'MS 2 (Deplasman)', targetTeam: 'AWAY' }),
         pModel: modelProbs.ms2, pPrior: priorProbs.ms2,
         marketOdds: odds.ms2, allMarketOdds: [odds.ms1, odds.msX, odds.ms2],
         relMomentum: lambdas.momentumA * lambdas.burst5A, relIgp: flow.igpAway,
         relQuality: lambdas.qPosA, relXgDebt: lambdas.xgDebtA,
         relGri: lambdas.griH, relPce: lambdas.pceA, relHlov: lambdas.hlovH,
-        reasonBuilder: () => {
+        reasonBuilder: (dOdds, cScore, mProb) => {
           const isHt = match.status === 'HT';
           const pfx = isHt ? 'İlk yarıda ceza sahası içinden' : 'Son 10 dakikada';
           const shotInfo = isHt ? `${boxA} şut bularak ${(aStats.xg || 0).toFixed(2)} xG üretti (${aStats.shotsOnTarget || 0} isabet)` : `${d10ShotsA} şut ve ${d10CorA} korner üretti (Ceza sahası: ${boxA})`;
-          return `Deplasman Kuşatması: ${match.away.name} ${pfx} ${shotInfo}; deplasman galibiyet olasılığı %${Math.round(modelProbs.ms2 * 100)}.`;
+          return `Deplasman Kuşatması: ${match.away.name} ${pfx} ${shotInfo}; deplasman galibiyet olasılığı %${mProb || Math.round(modelProbs.ms2 * 100)} (İkna: ${cScore}/100).`;
         }
       })
     ];
@@ -1902,18 +2326,20 @@ class QuantSignalEngine {
     const bttsOptions = [
       evaluateOption({
         marketKey: 'BTTS', marketTitle: 'KG Var / Yok', selection: 'KG Var',
+        marketDefinition: new MarketDefinition({ marketKey: 'BTTS', period: 'FT', selection: 'KG Var' }),
         pModel: modelProbs.bttsYes, pPrior: priorProbs.bttsYes,
         marketOdds: odds.bttsYes, allMarketOdds: [odds.bttsYes, odds.bttsNo],
         relMomentum: ((lambdas.momentumH + lambdas.momentumA) / 2) * Math.max(lambdas.burst5H, lambdas.burst5A),
         relIgp: Math.max(flow.igpHome, flow.igpAway),
         relQuality: (lambdas.qPosH + lambdas.qPosA) / 2, relXgDebt: (lambdas.xgDebtH + lambdas.xgDebtA) / 1.5,
-        relGri: (lambdas.griA?.regime === 'UNSUSTAINABLE_VARIANCE' || lambdas.griH?.regime === 'UNSUSTAINABLE_VARIANCE') ? { active: true, regime: 'UNSUSTAINABLE_VARIANCE', edgeBonus: 10, convictionMult: 1.08 } : null,
+        relGri: (lambdas.griA?.regime === 'UNSUSTAINABLE_VARIANCE' || lambdas.griH?.regime === 'UNSUSTAINABLE_VARIANCE') ? { active: true, regime: 'UNSUSTAINABLE_VARIANCE', edgeBonus: 0, convictionMult: 1.08 } : null,
         relPce: (lambdas.pceH?.isProgressiveSiege || lambdas.pceA?.isProgressiveSiege) ? { pce: 1.15 } : null,
         relHlov: (lambdas.hlovA?.active || lambdas.hlovH?.active) ? { active: true } : null,
-        reasonBuilder: () => `Karşılıklı Hücum Tehdidi: İki takım da ceza sahasında pozisyon üretiyor (Ev ${boxH} şut/${hStats.shotsOnTarget || 0} isabet, Dep ${boxA} şut/${aStats.shotsOnTarget || 0} isabet); KG Var ihtimali %${Math.round(modelProbs.bttsYes * 100)}.`
+        reasonBuilder: (dOdds, cScore, mProb) => `Karşılıklı Hücum Tehdidi: İki takım da ceza sahasında pozisyon üretiyor (Ev ${boxH} şut/${hStats.shotsOnTarget || 0} isabet, Dep ${boxA} şut/${aStats.shotsOnTarget || 0} isabet); KG Var olasılığı %${mProb || Math.round(modelProbs.bttsYes * 100)} (İkna: ${cScore}/100).`
       }),
       evaluateOption({
         marketKey: 'BTTS', marketTitle: 'KG Var / Yok', selection: 'KG Yok',
+        marketDefinition: new MarketDefinition({ marketKey: 'BTTS', period: 'FT', selection: 'KG Yok' }),
         pModel: modelProbs.bttsNo, pPrior: priorProbs.bttsNo,
         marketOdds: odds.bttsNo, allMarketOdds: [odds.bttsYes, odds.bttsNo],
         relMomentum: 2.0 - Math.min(lambdas.momentumH, lambdas.momentumA), relIgp: 100 - Math.min(flow.igpHome, flow.igpAway),
@@ -1921,7 +2347,7 @@ class QuantSignalEngine {
         relGri: (lambdas.griA?.regime === 'IMPENETRABLE_WALL' && lambdas.griH?.regime === 'IMPENETRABLE_WALL') ? { active: true, regime: 'IMPENETRABLE_WALL', convictionMult: 1.12 } : null,
         relPce: (lambdas.pceH?.isSterilePossession && lambdas.pceA?.isSterilePossession) ? { pce: 0.82 } : null,
         relHlov: null,
-        reasonBuilder: () => `Tek Taraflı Savunma Kilidi: Hücumdaki ceza sahası uzaklığı nedeniyle takımların karşılıklı gol bulması zor görünüyor (%${Math.round(modelProbs.bttsNo * 100)} Model Olasılığı).`
+        reasonBuilder: (dOdds, cScore, mProb) => `Tek Taraflı Savunma Kilidi: Hücumdaki ceza sahası uzaklığı nedeniyle takımların karşılıklı gol bulması zor görünüyor (%${mProb || Math.round(modelProbs.bttsNo * 100)} Model Olasılığı • İkna: ${cScore}/100).`
       })
     ];
 
@@ -1929,6 +2355,7 @@ class QuantSignalEngine {
     const ouOptions = [
       evaluateOption({
         marketKey: 'OU', marketTitle: `Alt / Üst (${activeLine})`, selection: `${activeLine} Üst`, line: activeLine,
+        marketDefinition: new MarketDefinition({ marketKey: 'OU', line: activeLine, period: 'FT', selection: `${activeLine} Üst` }),
         pModel: modelProbs.overProb, pPrior: priorProbs.overProb,
         marketOdds: ftLineOdds.over, allMarketOdds: [ftLineOdds.over, ftLineOdds.under],
         relMomentum: Math.max(lambdas.momentumH * lambdas.burst5H, lambdas.momentumA * lambdas.burst5A),
@@ -1937,18 +2364,19 @@ class QuantSignalEngine {
         relGri: (lambdas.griA?.regime === 'UNSUSTAINABLE_VARIANCE' ? lambdas.griA : (lambdas.griH?.regime === 'UNSUSTAINABLE_VARIANCE' ? lambdas.griH : null)),
         relPce: (lambdas.pceH?.isProgressiveSiege ? lambdas.pceH : (lambdas.pceA?.isProgressiveSiege ? lambdas.pceA : null)),
         relHlov: (lambdas.hlovA?.active ? lambdas.hlovA : (lambdas.hlovH?.active ? lambdas.hlovH : null)),
-        reasonBuilder: () => {
+        reasonBuilder: (dOdds, cScore, mProb) => {
           const isHt = match.status === 'HT';
           const timeCtx = isHt ? 'İlk yarıda' : 'Karşılaşmada';
           const totXgVal = ((hStats.xg || 0) + (aStats.xg || 0)).toFixed(2);
           if (gH === 1 && gA === 1 && minute >= 50) {
-            return `1-1 Kilit Kırılması & Tek Gol Hedefi: Dakika ${minute}' itibarıyla iki takım da ceza sahasına yükleniyor (${boxH + boxA} ceza sahası şutu, ${totCorners} korner, ${totXgVal} xG). Kazanması için sadece TEK BİR GOL gereken ${activeLine} Üst fırsatında gol beklentisi doygunluğa ulaştı (Hedef: ${activeLine} Üst / %${Math.round(modelProbs.overProb * 100)} Model Olasılığı).`;
+            return `1-1 Kilit Kırılması & Tek Gol Hedefi: Dakika ${minute}' itibarıyla iki takım da ceza sahasına yükleniyor (${boxH + boxA} ceza sahası şutu, ${totCorners} korner, ${totXgVal} xG). Kazanması için sadece TEK BİR GOL gereken ${activeLine} Üst fırsatında gol beklentisi doygunluğa ulaştı (Hedef: ${activeLine} Üst / %${mProb || Math.round(modelProbs.overProb * 100)} Model Olasılığı • İkna: ${cScore}/100).`;
           }
-          return `Gol Doygunluğu & Hücum Kuşatması: ${timeCtx} toplam ${totShots} şut (${totSot} isabet, ${boxH + boxA} ceza sahası içi) ve ${totCorners} korner ile ${totXgVal} xG birikti. Savunma dirençleri kırılma noktasında; ${activeLine} Üst beklentisi kaçınılmaz (Hedef: ${activeLine} Üst / %${Math.round(modelProbs.overProb * 100)} Güven).`;
+          return `Gol Doygunluğu & Hücum Kuşatması: ${timeCtx} toplam ${totShots} şut (${totSot} isabet, ${boxH + boxA} ceza sahası içi) ve ${totCorners} korner ile ${totXgVal} xG birikti. Savunma dirençleri kırılma noktasında; ${activeLine} Üst beklentisi kaçınılmaz (Hedef: ${activeLine} Üst / %${mProb || Math.round(modelProbs.overProb * 100)} Model Olasılığı • İkna: ${cScore}/100).`;
         }
       }),
       evaluateOption({
         marketKey: 'OU', marketTitle: `Alt / Üst (${activeLine})`, selection: `${activeLine} Alt`, line: activeLine,
+        marketDefinition: new MarketDefinition({ marketKey: 'OU', line: activeLine, period: 'FT', selection: `${activeLine} Alt` }),
         pModel: modelProbs.underProb, pPrior: priorProbs.underProb,
         marketOdds: ftLineOdds.under, allMarketOdds: [ftLineOdds.over, ftLineOdds.under],
         relMomentum: 2.0 - ((lambdas.momentumH + lambdas.momentumA) / 2), relIgp: 100 - Math.max(flow.igpHome, flow.igpAway),
@@ -1956,25 +2384,27 @@ class QuantSignalEngine {
         relGri: (lambdas.griA?.regime === 'IMPENETRABLE_WALL' && lambdas.griH?.regime === 'IMPENETRABLE_WALL') ? { active: true, regime: 'IMPENETRABLE_WALL', convictionMult: 1.14 } : null,
         relPce: (lambdas.pceH?.isSterilePossession || lambdas.pceA?.isSterilePossession) ? { pce: 0.85 } : null,
         relHlov: null,
-        reasonBuilder: () => `Savunma Kilidi: Düşük ceza sahası şut üretimi ve ${totFouls} faul ile oyun temposu kilitlendi; ${activeLine} Alt gidişatı kuvvetli (%${Math.round(modelProbs.underProb * 100)} Model Olasılığı).`
+        reasonBuilder: (dOdds, cScore, mProb) => `Savunma Kilidi: Düşük ceza sahası şut üretimi ve ${totFouls} faul ile oyun temposu kilitlendi; ${activeLine} Alt gidişatı kuvvetli (%${mProb || Math.round(modelProbs.underProb * 100)} Model Olasılığı • İkna: ${cScore}/100).`
       })
     ];
 
     const htBttsOptions = [
       evaluateOption({
         marketKey: 'HT_BTTS', marketTitle: 'İY KG Var / Yok', selection: 'İY KG Var',
+        marketDefinition: new MarketDefinition({ marketKey: 'HT_BTTS', period: 'HT', selection: 'İY KG Var' }),
         pModel: modelProbs.htBttsYes, pPrior: priorProbs.htBttsYes,
         marketOdds: odds.htBttsYes, allMarketOdds: [odds.htBttsYes, odds.htBttsNo],
         relMomentum: (lambdas.momentumH + lambdas.momentumA) / 2, relIgp: Math.max(flow.igpHome, flow.igpAway),
         relQuality: maxQPos, relXgDebt: maxXgDebt,
-        relGri: (lambdas.griA?.regime === 'UNSUSTAINABLE_VARIANCE' || lambdas.griH?.regime === 'UNSUSTAINABLE_VARIANCE') ? { active: true, regime: 'UNSUSTAINABLE_VARIANCE', edgeBonus: 10, convictionMult: 1.08 } : null,
+        relGri: (lambdas.griA?.regime === 'UNSUSTAINABLE_VARIANCE' || lambdas.griH?.regime === 'UNSUSTAINABLE_VARIANCE') ? { active: true, regime: 'UNSUSTAINABLE_VARIANCE', edgeBonus: 0, convictionMult: 1.08 } : null,
         relPce: (lambdas.pceH?.isProgressiveSiege || lambdas.pceA?.isProgressiveSiege) ? { pce: 1.15 } : null,
         relHlov: (lambdas.hlovA?.active || lambdas.hlovH?.active) ? { active: true } : null,
         isFirstHalfOnly: true,
-        reasonBuilder: () => `İlk Yarı Açık Oyun: Devre bitmeden iki ekibin de ceza sahası içi üretimi yüksek; karşılıklı gol beklentisi öne çıkıyor.`
+        reasonBuilder: (dOdds, cScore, mProb) => `İlk Yarı Açık Oyun: Devre bitmeden iki ekibin de ceza sahası içi üretimi yüksek; karşılıklı gol beklentisi öne çıkıyor (%${mProb || Math.round(modelProbs.htBttsYes * 100)} Model Olasılığı • İkna: ${cScore}/100).`
       }),
       evaluateOption({
         marketKey: 'HT_BTTS', marketTitle: 'İY KG Var / Yok', selection: 'İY KG Yok',
+        marketDefinition: new MarketDefinition({ marketKey: 'HT_BTTS', period: 'HT', selection: 'İY KG Yok' }),
         pModel: modelProbs.htBttsNo, pPrior: priorProbs.htBttsNo,
         marketOdds: odds.htBttsNo, allMarketOdds: [odds.htBttsYes, odds.htBttsNo],
         relMomentum: 2.0 - Math.min(lambdas.momentumH, lambdas.momentumA), relIgp: 100 - Math.min(flow.igpHome, flow.igpAway),
@@ -1983,7 +2413,7 @@ class QuantSignalEngine {
         relPce: (lambdas.pceH?.isSterilePossession && lambdas.pceA?.isSterilePossession) ? { pce: 0.82 } : null,
         relHlov: null,
         isFirstHalfOnly: true,
-        reasonBuilder: () => `İlk Yarı Savunma Disiplini: İlk yarıda savunmalar hata yapmıyor; devre sonuna kadar karşılıklı gol çıkmama ihtimali yüksek.`
+        reasonBuilder: (dOdds, cScore, mProb) => `İlk Yarı Savunma Disiplini: İlk yarıda savunmalar hata yapmıyor; devre sonuna kadar karşılıklı gol çıkmama ihtimali yüksek (%${mProb || Math.round(modelProbs.htBttsNo * 100)} Model Olasılığı • İkna: ${cScore}/100).`
       })
     ];
 
@@ -1992,6 +2422,7 @@ class QuantSignalEngine {
     const htOuOptions = [
       evaluateOption({
         marketKey: 'HT_OU', marketTitle: `İY Alt / Üst (${htActiveLine})`, selection: `İY ${htActiveLine} Üst`, line: htActiveLine,
+        marketDefinition: new MarketDefinition({ marketKey: 'HT_OU', line: htActiveLine, period: 'HT', selection: `İY ${htActiveLine} Üst` }),
         pModel: modelProbs.htOverProb, pPrior: priorProbs.htOverProb,
         marketOdds: htLineOdds.over, allMarketOdds: [htLineOdds.over, htLineOdds.under],
         relMomentum: Math.max(lambdas.momentumH * lambdas.burst5H, lambdas.momentumA * lambdas.burst5A),
@@ -2001,10 +2432,11 @@ class QuantSignalEngine {
         relPce: (lambdas.pceH?.isProgressiveSiege ? lambdas.pceH : (lambdas.pceA?.isProgressiveSiege ? lambdas.pceA : null)),
         relHlov: (lambdas.hlovA?.active ? lambdas.hlovA : (lambdas.hlovH?.active ? lambdas.hlovH : null)),
         isFirstHalfOnly: true,
-        reasonBuilder: () => `İlk Yarı Sonu Baskısı: Devre öncesi son bölümde ${d10ShotsTot} şut ve ${d10CorTot} korner üretildi; devre bitmeden İY ${htActiveLine} Üst golü bekleniyor.`
+        reasonBuilder: (dOdds, cScore, mProb) => `İlk Yarı Sonu Baskısı: Devre öncesi son bölümde ${d10ShotsTot} şut ve ${d10CorTot} korner üretildi; devre bitmeden İY ${htActiveLine} Üst golü bekleniyor (%${mProb || Math.round(modelProbs.htOverProb * 100)} Model Olasılığı • İkna: ${cScore}/100).`
       }),
       evaluateOption({
         marketKey: 'HT_OU', marketTitle: `İY Alt / Üst (${htActiveLine})`, selection: `İY ${htActiveLine} Alt`, line: htActiveLine,
+        marketDefinition: new MarketDefinition({ marketKey: 'HT_OU', line: htActiveLine, period: 'HT', selection: `İY ${htActiveLine} Alt` }),
         pModel: modelProbs.htUnderProb, pPrior: priorProbs.htUnderProb,
         marketOdds: htLineOdds.under, allMarketOdds: [htLineOdds.over, htLineOdds.under],
         relMomentum: 2.0 - ((lambdas.momentumH + lambdas.momentumA) / 2), relIgp: 100 - Math.max(flow.igpHome, flow.igpAway),
@@ -2013,7 +2445,7 @@ class QuantSignalEngine {
         relPce: (lambdas.pceH?.isSterilePossession || lambdas.pceA?.isSterilePossession) ? { pce: 0.85 } : null,
         relHlov: null,
         isFirstHalfOnly: true,
-        reasonBuilder: () => `İlk Yarı Savunma Kilidi: İlk yarıda savunmalar risk almıyor; devre sonuna kadar düşük skorlu gidişat teyitli.`
+        reasonBuilder: (dOdds, cScore, mProb) => `İlk Yarı Savunma Kilidi: İlk yarıda savunmalar risk almıyor; devre sonuna kadar düşük skorlu gidişat teyitli (%${mProb || Math.round(modelProbs.htUnderProb * 100)} Model Olasılığı • İkna: ${cScore}/100).`
       })
     ];
 
@@ -2021,60 +2453,72 @@ class QuantSignalEngine {
     const ngOptions = [
       evaluateOption({
         marketKey: 'NEXT_GOAL', marketTitle: `Sıradaki Gol (${nextGoalNum}. Gol)`, selection: 'Sıradaki Gol: Ev Sahibi',
+        targetTeam: 'HOME',
+        marketDefinition: new MarketDefinition({ marketKey: 'NEXT_GOAL', period: 'FT', selection: 'Sıradaki Gol: Ev Sahibi', targetTeam: 'HOME' }),
         pModel: modelProbs.nextGoalHome, pPrior: priorProbs.nextGoalHome,
         marketOdds: odds.nextGoalHome, allMarketOdds: [odds.nextGoalHome, odds.nextGoalNo, odds.nextGoalAway],
         relMomentum: lambdas.momentumH * lambdas.burst5H, relIgp: flow.igpHome,
         relQuality: lambdas.qPosH, relXgDebt: lambdas.xgDebtH,
         relGri: lambdas.griA, relPce: lambdas.pceH, relHlov: lambdas.hlovA,
-        reasonBuilder: (displayMarketOdds) => {
+        reasonBuilder: (displayMarketOdds, cScore, mProb) => {
           const isHt = match.status === 'HT';
           const timeCtx = isHt ? 'ilk yarıda ceza sahası içinden' : 'son 10 dakikada';
           const xgVal = (hStats.xg || 0).toFixed(2);
           const shotCtx = isHt ? `${boxH} şut bularak ${xgVal} xG üretti (${hStats.shotsOnTarget || 0} isabet)` : `${d10ShotsH} şut ve ${d10CorH} kornerle rakip kaleyi ablukaya aldı`;
-          return `Ceza Sahası Kuşatması: ${match.home.name} ${timeCtx} ${shotCtx}. Deplasman savunması geriye yaslandı; 2. yarıda ${nextGoalNum}. gol baskısı kaçınılmaz (Hedef: Sıradaki Gol Ev @${displayMarketOdds} / %${Math.round(modelProbs.nextGoalHome * 100)} Güven).`;
+          return `Ceza Sahası Kuşatması: ${match.home.name} ${timeCtx} ${shotCtx}. Deplasman savunması geriye yaslandı; 2. yarıda ${nextGoalNum}. gol baskısı kaçınılmaz (Hedef: Sıradaki Gol Ev @${displayMarketOdds} / %${mProb || Math.round(modelProbs.nextGoalHome * 100)} Model Olasılığı • İkna: ${cScore}/100).`;
         }
       }),
       evaluateOption({
         marketKey: 'NEXT_GOAL', marketTitle: `Sıradaki Gol (${nextGoalNum}. Gol)`, selection: 'Sıradaki Gol: Deplasman',
+        targetTeam: 'AWAY',
+        marketDefinition: new MarketDefinition({ marketKey: 'NEXT_GOAL', period: 'FT', selection: 'Sıradaki Gol: Deplasman', targetTeam: 'AWAY' }),
         pModel: modelProbs.nextGoalAway, pPrior: priorProbs.nextGoalAway,
         marketOdds: odds.nextGoalAway, allMarketOdds: [odds.nextGoalHome, odds.nextGoalNo, odds.nextGoalAway],
         relMomentum: lambdas.momentumA * lambdas.burst5A, relIgp: flow.igpAway,
         relQuality: lambdas.qPosA, relXgDebt: lambdas.xgDebtA,
         relGri: lambdas.griH, relPce: lambdas.pceA, relHlov: lambdas.hlovH,
-        reasonBuilder: () => {
+        reasonBuilder: (displayMarketOdds, cScore, mProb) => {
           const isHt = match.status === 'HT';
           const timeCtx = isHt ? 'ilk yarıda ceza sahası içinden' : 'son 10 dakikada';
           const xgVal = (aStats.xg || 0).toFixed(2);
           const shotCtx = isHt ? `${boxA} şut bularak ${xgVal} xG üretti (${aStats.shotsOnTarget || 0} isabet)` : `${d10ShotsA} şut ve ${d10CorA} kornerle rakip kaleyi ablukaya aldı`;
-          return `Deplasman Kuşatması: ${match.away.name} ${timeCtx} ${shotCtx}; ${nextGoalNum}. gol deplasmanda bekleniyor (Model: %${Math.round(modelProbs.nextGoalAway * 100)}).`;
+          return `Deplasman Kuşatması: ${match.away.name} ${timeCtx} ${shotCtx}; ${nextGoalNum}. gol deplasmanda bekleniyor (%${mProb || Math.round(modelProbs.nextGoalAway * 100)} Model Olasılığı • İkna: ${cScore}/100).`;
         }
       }),
       evaluateOption({
         marketKey: 'NEXT_GOAL', marketTitle: `Sıradaki Gol (${nextGoalNum}. Gol)`, selection: `Gol Olmaz (${gH}-${gA})`,
+        targetTeam: 'NONE',
+        marketDefinition: new MarketDefinition({ marketKey: 'NEXT_GOAL', period: 'FT', selection: `Gol Olmaz (${gH}-${gA})`, targetTeam: 'NONE' }),
         pModel: modelProbs.noMoreGoals, pPrior: priorProbs.noMoreGoals,
         marketOdds: odds.nextGoalNo, allMarketOdds: [odds.nextGoalHome, odds.nextGoalNo, odds.nextGoalAway],
         relMomentum: 2.0 - Math.max(lambdas.momentumH, lambdas.momentumA), relIgp: 100 - Math.max(flow.igpHome, flow.igpAway),
         relQuality: 1.0, relXgDebt: 0,
         relGri: (lambdas.griA?.regime === 'IMPENETRABLE_WALL' && lambdas.griH?.regime === 'IMPENETRABLE_WALL') ? { active: true, regime: 'IMPENETRABLE_WALL', convictionMult: 1.15 } : null,
         relPce: null, relHlov: null,
-        reasonBuilder: () => `Rölanti / Savunma Kilidi: Düşük tempo ve kilitli savunmalar nedeniyle maçın başka gol olmadan ${gH}-${gA} tamamlanma ihtimali %${(modelProbs.noMoreGoals * 100).toFixed(1)}.`
+        reasonBuilder: (displayMarketOdds, cScore, mProb) => `Rölanti / Savunma Kilidi: Düşük tempo ve kilitli savunmalar nedeniyle maçın başka gol olmadan ${gH}-${gA} tamamlanma ihtimali %${mProb || (modelProbs.noMoreGoals * 100).toFixed(1)} (İkna: ${cScore}/100).`
       })
     ];
 
     const pickBest = (options) => {
       if (isScheduled) {
-        return [...options].sort((a, b) => b.modelProbPct - a.modelProbPct)[0];
+        return [...options].sort((a, b) => (b.modelProbability ?? b.modelProbPct) - (a.modelProbability ?? a.modelProbPct))[0];
       }
       const valid = options.filter(o =>
         o.allowedByState &&
-        o.confidence >= 74 &&
+        (o.convictionScore ?? o.confidence) >= 74 &&
         o.edgePct >= 4.2 &&
         o.marketOdds >= 1.35 &&
         o.marketOdds <= 4.20 &&
         (o.evPct == null || o.evPct >= 3.0)
       );
       if (valid.length === 0) return null;
-      return [...valid].sort((a, b) => (b.convictionScore + b.edgePct * 1.6 + (b.evPct || 0) * 0.5) - (a.convictionScore + a.edgePct * 1.6 + (a.evPct || 0) * 0.5))[0];
+      const getSniper = (o) => {
+        const c = o.convictionScore ?? o.confidence ?? 0;
+        const m = o.modelProbability ?? o.modelProbPct ?? 0;
+        const ev = o.evPct || 0;
+        return (o.signalType === 'VALUE_SIGNAL' ? 15 : 0) + (c * 0.70) + (m * 0.30) + (ev * 0.80);
+      };
+      return [...valid].sort((a, b) => getSniper(b) - getSniper(a))[0];
     };
 
     const marketBoard = {
@@ -2150,27 +2594,38 @@ class QuantSignalEngine {
       }
 
       // Best selection or dominant model option
-      const sortedByProb = [...(group.options || [])].sort((a, b) => b.modelProbPct - a.modelProbPct);
+      const sortedByProb = [...(group.options || [])].sort((a, b) => (b.modelProbability ?? b.modelProbPct) - (a.modelProbability ?? a.modelProbPct));
       const topOption = sortedByProb[0];
       const displaySelection = best
         ? best.selection
         : (isClosed ? statusLabel : (topOption ? `${topOption.selection}` : 'Canlı Model'));
-      const displayConfidence = best ? best.confidence : (topOption ? Math.round(topOption.modelProbPct) : 0);
+      const displayConfidence = best ? (best.convictionScore ?? best.confidence) : (topOption ? Math.round(topOption.modelProbability ?? topOption.modelProbPct) : 0);
 
       return {
         marketTitle: group.options?.[0]?.marketTitle || key,
         selection: displaySelection,
         confidence: isClosed && !bttsSettled && !htOuSettled ? 0 : displayConfidence,
+        convictionScore: best ? best.convictionScore : null,
+        modelProbability: best ? best.modelProbability : (topOption ? topOption.modelProbability : null),
+        signalType: best?.signalType || null,
         tierBadge: best?.tierBadge || null,
         closed: isClosed,
         marketStatus,
         statusLabel,
         allOptions: (group.options || []).map(o => ({
           selection: o.selection,
-          prob: (o.modelProbPct || 0) / 100,
+          prob: (o.modelProbability || o.modelProbPct || 0) / 100,
+          modelProbability: o.modelProbability,
+          marketProbability: o.marketProbability,
+          marketEdgePp: o.marketEdgePp,
+          priorDeltaPp: o.priorDeltaPp,
           odds: o.marketOdds,
           fairOdds: o.fairOdds,
           evPct: o.hasRealOdds ? o.evPct : null,
+          convictionScore: o.convictionScore,
+          signalType: o.signalType,
+          signalTier: o.signalTier,
+          tierBadge: o.tierBadge,
           hasRealOdds: Boolean(o.hasRealOdds),
           isSyntheticOdds: Boolean(o.isSyntheticOdds),
           allowed: Boolean(o.allowedByState) && !isClosed
@@ -2205,4 +2660,5 @@ class QuantSignalEngine {
   }
 }
 
+QuantSignalEngine.MarketDefinition = MarketDefinition;
 module.exports = QuantSignalEngine;

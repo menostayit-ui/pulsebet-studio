@@ -11,6 +11,8 @@ const FlashscoreScraper = require('./FlashscoreScraper');
 const Scores365Scraper = require('./Scores365Scraper');
 const EspnScraper = require('./EspnScraper');
 const TeamNameMatcher = require('./TeamNameMatcher');
+const QuantSignalEngine = require('../engine/QuantSignalEngine');
+const MarketDefinition = QuantSignalEngine.MarketDefinition;
 
 class MultiSourceOrchestrator {
   constructor({ store, diffEngine, momentumEngine, playerEngine, quantEngine, onBroadcast }) {
@@ -751,21 +753,21 @@ class MultiSourceOrchestrator {
           const gA = Number(match.away?.score || 0);
           const currentGoals = gH + gA;
 
-          let line = sig.line;
-          if (line === undefined || line === null || isNaN(line)) {
-            const matchLine = sel.match(/(\d+\.?\d*)\s*Üst/i) || sel.match(/(\d+\.?\d*)/);
-            line = matchLine ? parseFloat(matchLine[1]) : 2.5;
-          }
+          const mDef = sig.marketDefinition || new MarketDefinition({
+            marketKey: sig.marketKey || (sel.includes('İY') ? 'HT_OU' : 'OU'),
+            selection: sel,
+            line: sig.line
+          });
 
-          const isHtOu = sig.marketKey === 'HT_OU' || sel.includes('İY');
+          const isHtOu = mDef.marketKey === 'HT_OU' || sel.includes('İY');
           const effectiveScore = isHtOu
             ? ((match.status === 'LIVE' && min <= 45) ? currentGoals : (Number(match.home?.htScore || 0) + Number(match.away?.htScore || 0)))
             : currentGoals;
 
-          const goalsRequiredToWin = Math.floor(line) + 1;
-          const goalsNeeded = goalsRequiredToWin - effectiveScore;
+          const goalsNeeded = mDef.goalsNeededToWin(effectiveScore);
+          if (goalsNeeded === null) return false;
 
-          return goalsNeeded >= 2;
+          return goalsNeeded >= 2 || goalsNeeded <= 0;
         };
 
         let targetSig = quant.primarySignal;
@@ -795,6 +797,16 @@ class MultiSourceOrchestrator {
           const warmedUp = Boolean(match._statsHydrated) && (match._deepCount || 0) >= 1;
 
           if (warmedUp && !inCooldown && !marketBusy && !overLimit && !this.store.hasSignalFingerprint(sigFp)) {
+            const modelProb = topSig.modelProbability !== undefined
+              ? topSig.modelProbability
+              : (topSig.modelProbPct !== undefined ? topSig.modelProbPct : 50);
+            const convScore = topSig.convictionScore !== undefined
+              ? topSig.convictionScore
+              : (topSig.confidence !== undefined ? topSig.confidence : 70);
+            const evPct = topSig.evPct !== undefined ? topSig.evPct : null;
+            const signalType = topSig.signalType || (topSig.hasRealOdds && (evPct != null && evPct >= 3.0) ? 'VALUE_SIGNAL' : 'MODEL_SIGNAL');
+            const tierBadge = topSig.tierBadge || (signalType === 'VALUE_SIGNAL' ? 'DEĞER SİNYALİ (B+)' : 'MODEL TAHMİNİ (B+)');
+
             detectedSignals.push({
               id: `sig_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
               timestamp: Date.now(),
@@ -815,13 +827,19 @@ class MultiSourceOrchestrator {
               shotSummary: this.diffEngine.buildShotSummary(match),
               archetypeLabel: topSig.archetypeLabel || flow.archetypeLabel || 'Gidişat Sinyali',
               narrative: flow.narrative || topSig.reasoning,
-              signalTier: topSig.signalTier || 'VALUE_B_PLUS',
-              tierBadge: topSig.tierBadge || 'DEĞER SİNYALİ (B+)',
-              convictionScore: topSig.convictionScore || topSig.confidence,
+              signalType: signalType,
+              signalTier: topSig.signalTier || (signalType === 'VALUE_SIGNAL' ? 'VALUE_B_PLUS' : 'MODEL_B_PLUS'),
+              tierBadge: tierBadge,
+              modelProbability: modelProb,
+              marketProbability: topSig.marketProbability !== undefined ? topSig.marketProbability : null,
+              marketEdgePp: topSig.marketEdgePp !== undefined ? topSig.marketEdgePp : null,
+              priorDeltaPp: topSig.priorDeltaPp !== undefined ? topSig.priorDeltaPp : null,
+              evPct: evPct,
+              convictionScore: convScore,
               evidenceFactors: flow.evidenceFactors || [],
               signal: topSig,
               complementarySignal: (targetSig === quant.primarySignal ? quant.complementarySignal : null),
-              title: `${topSig.selection} (%${topSig.confidence} Güven)`,
+              title: `${topSig.selection} (${tierBadge} • %${modelProb})`,
               message: topSig.reasoning
             });
           }

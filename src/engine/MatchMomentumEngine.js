@@ -29,8 +29,24 @@
  */
 
 class MatchMomentumEngine {
+  constructor() {
+    this.archetypeStates = new Map(); // matchId -> { archetype, archetypeLabel, narrative, dwellCount, ... }
+  }
+
   clamp(min, max, val) {
     return Math.max(min, Math.min(max, val));
+  }
+
+  getArchetypeState(matchId) {
+    return this.archetypeStates.get(matchId) || null;
+  }
+
+  resetArchetypeState(matchId) {
+    if (matchId) {
+      this.archetypeStates.delete(matchId);
+    } else {
+      this.archetypeStates.clear();
+    }
   }
 
   /**
@@ -40,15 +56,41 @@ class MatchMomentumEngine {
    *  - Shots On Target (1.80x)
    *  - Woodwork (1.60x)
    *  - Big Chances (2.80x)
+   * 
+   * Decoupled from corner set-pieces; calibrated to Math.round(0.68 * sot) when shotsInsideBox is null or missing.
+   * If detailed object is requested via options.detailed, returns rich calculation object flagging isEstimated.
+   * Preserves numeric value / coercion (valueOf, toFixed, toString, Symbol.toPrimitive) for full backwards compatibility.
    */
-  computeHighDangerIndex(stats = {}) {
+  computeHighDangerIndex(stats = {}, options = {}) {
     const sot = stats.shotsOnTarget || 0;
-    const cor = stats.corners || 0;
-    const box = stats.shotsInsideBox != null ? stats.shotsInsideBox : Math.round(0.62 * sot + 0.35 * cor);
+    const hasTrueBox = stats.shotsInsideBox != null && !isNaN(stats.shotsInsideBox);
+    const isEstimated = !hasTrueBox;
+    const box = hasTrueBox ? Number(stats.shotsInsideBox) : Math.round(0.68 * sot);
     const wood = stats.woodwork || 0;
     const bc = stats.bigChances || 0;
-    const hdi = (2.50 * box) + (1.80 * sot) + (1.60 * wood) + (2.80 * bc);
-    return Number(hdi.toFixed(2));
+    const rawHdi = (2.50 * box) + (1.80 * sot) + (1.60 * wood) + (2.80 * bc);
+    const hdi = Number(rawHdi.toFixed(2));
+
+    const isDetailed = Boolean(options === true || options?.detailed || options?.returnObject);
+    if (isDetailed) {
+      return {
+        hdi,
+        value: hdi,
+        isEstimated,
+        shotsInsideBox: box,
+        shotsOnTarget: sot,
+        woodwork: wood,
+        bigChances: bc,
+        valueOf() { return this.hdi; },
+        toString() { return String(this.hdi); },
+        toFixed(digits) { return this.hdi.toFixed(digits); },
+        [Symbol.toPrimitive](hint) {
+          if (hint === 'string') return String(this.hdi);
+          return this.hdi;
+        }
+      };
+    }
+    return hdi;
   }
 
   /**
@@ -170,7 +212,7 @@ class MatchMomentumEngine {
     const sot = stats.shotsOnTarget || 0;
     const soff = stats.shotsOffTarget || 0;
     const blk = stats.blockedShots || 0;
-    const box = stats.shotsInsideBox != null ? stats.shotsInsideBox : Math.round(0.62 * sot + 0.35 * (stats.corners || 0));
+    const box = stats.shotsInsideBox != null ? stats.shotsInsideBox : Math.round(0.68 * sot);
     const outBox = Math.max(0, (stats.totalShots || 0) - box);
     const bc = stats.bigChances || 0;
     const wood = stats.woodwork || 0;
@@ -218,7 +260,7 @@ class MatchMomentumEngine {
 
     const sot = stats.shotsOnTarget || 0;
     const cor = stats.corners || 0;
-    const box = stats.shotsInsideBox != null ? stats.shotsInsideBox : Math.round(0.62 * sot + 0.35 * cor);
+    const box = stats.shotsInsideBox != null ? stats.shotsInsideBox : Math.round(0.68 * sot);
     const bc = stats.bigChances || 0;
     const wood = stats.woodwork || 0;
     const hdi = this.computeHighDangerIndex(stats);
@@ -267,7 +309,7 @@ class MatchMomentumEngine {
     }
 
     const hdi = this.computeHighDangerIndex(attStats);
-    const boxShots = attStats.shotsInsideBox != null ? attStats.shotsInsideBox : Math.round(0.62 * sotFaced + 0.35 * (attStats.corners || 0));
+    const boxShots = attStats.shotsInsideBox != null ? attStats.shotsInsideBox : Math.round(0.68 * sotFaced);
     const bc = attStats.bigChances || 0;
     const wood = attStats.woodwork || 0;
     const xg = attStats.xg || this.estimateTeamXg(attStats, oppStats);
@@ -327,7 +369,7 @@ class MatchMomentumEngine {
     const da = stats.dangerousAttacks || 0;
     const oppDa = oppStats.dangerousAttacks || 0;
     const att = stats.attacks || Math.round(da * 1.6);
-    const box = stats.shotsInsideBox != null ? stats.shotsInsideBox : Math.round(0.62 * (stats.shotsOnTarget || 0) + 0.35 * (stats.corners || 0));
+    const box = stats.shotsInsideBox != null ? stats.shotsInsideBox : Math.round(0.68 * (stats.shotsOnTarget || 0));
     const passesCompleted = stats.passesCompleted || stats.passesAccurate || Math.round((possession / 100) * Math.min(90, t) * 9.2);
     const passAccuracy = stats.passAccuracy || (possession >= 55 ? 82 : (possession <= 45 ? 74 : 78));
 
@@ -684,9 +726,9 @@ class MatchMomentumEngine {
   }
 
   /**
-   * Detect Specific In-Play Signal Hunter Archetype (15 Total States + V7 Late Game Volatility, GRI & HLOV)
+   * Evaluate Raw Candidate Archetype (15 Total States + V7 Late Game Volatility, GRI & HLOV)
    */
-  detectArchetypeAndNarrative(match, gpiHome, gpiAway, dpiHome, dpiAway, igpHome, igpAway, pace, d5, d10, periodInfo, lgv = null, ccsm = null, gri = null, pce = null, hlov = null) {
+  evaluateRawArchetype(match, gpiHome, gpiAway, dpiHome, dpiAway, igpHome, igpAway, pace, d5, d10, periodInfo, lgv = null, ccsm = null, gri = null, pce = null, hlov = null) {
     const hS = match.home.stats || {};
     const aS = match.away.stats || {};
     const totShots = (hS.totalShots || 0) + (aS.totalShots || 0);
@@ -712,8 +754,8 @@ class MatchMomentumEngine {
     const d10AShots = d10?.away?.totalShots || 0;
     const d10ACor = d10?.away?.corners || 0;
     const d10ASot = d10?.away?.shotsOnTarget || 0;
-    const boxH = hS.shotsInsideBox || Math.round(0.62 * (hS.shotsOnTarget || 0) + 0.35 * (hS.corners || 0));
-    const boxA = aS.shotsInsideBox || Math.round(0.62 * (aS.shotsOnTarget || 0) + 0.35 * (aS.corners || 0));
+    const boxH = hS.shotsInsideBox != null ? hS.shotsInsideBox : Math.round(0.68 * (hS.shotsOnTarget || 0));
+    const boxA = aS.shotsInsideBox != null ? aS.shotsInsideBox : Math.round(0.68 * (aS.shotsOnTarget || 0));
 
     // 1. Scheduled / Pre-Match
     if (match.status === 'SCHEDULED') {
@@ -739,8 +781,8 @@ class MatchMomentumEngine {
       const open2 = match.odds?.openMs2 || match.odds?.ms2 || 2.90;
       const xgHVal = this.estimateTeamXg(hS, aS);
       const xgAVal = this.estimateTeamXg(aS, hS);
-      const boxHVal = hS.shotsInsideBox || Math.round(0.62 * (hS.shotsOnTarget || 0) + 0.35 * (hS.corners || 0));
-      const boxAVal = aS.shotsInsideBox || Math.round(0.62 * (aS.shotsOnTarget || 0) + 0.35 * (aS.corners || 0));
+      const boxHVal = hS.shotsInsideBox != null ? hS.shotsInsideBox : Math.round(0.68 * (hS.shotsOnTarget || 0));
+      const boxAVal = aS.shotsInsideBox != null ? aS.shotsInsideBox : Math.round(0.68 * (aS.shotsOnTarget || 0));
       const sotH = hS.shotsOnTarget || 0;
       const sotA = aS.shotsOnTarget || 0;
 
@@ -998,8 +1040,8 @@ class MatchMomentumEngine {
 
     // 8b. 1-1 SKORUNDA TAKTİKSEL PSİKOLOJİ & DERİN ANALİZ MODELİ (40' - 74')
     if (scoreH === 1 && scoreA === 1 && min >= 40 && min <= 74) {
-      const boxD10H = d10?.home?.shotsInsideBox || Math.round(0.62 * d10HSot + 0.35 * d10HCor);
-      const boxD10A = d10?.away?.shotsInsideBox || Math.round(0.62 * d10ASot + 0.35 * d10ACor);
+      const boxD10H = d10?.home?.shotsInsideBox != null ? d10.home.shotsInsideBox : Math.round(0.68 * d10HSot);
+      const boxD10A = d10?.away?.shotsInsideBox != null ? d10.away.shotsInsideBox : Math.round(0.68 * d10ASot);
       const d10TotShots = d10HShots + d10AShots;
       const d10TotSot = d10HSot + d10ASot;
 
@@ -1152,6 +1194,194 @@ class MatchMomentumEngine {
       narrative: totShots > 0
         ? `Oyun dengeli seyrediyor (Toplam ${totShots} şut, ${totSot} isabetli). Net bir baskı artışı veya fırsat bekleniyor.`
         : `Takımlar birbirini tartıyor. Henüz anlamlı bir şut veya baskı kırılması oluşmadı; sinyal avcısı beklemede.`
+    };
+  }
+
+  /**
+   * Detect Specific In-Play Signal Hunter Archetype with Dwell Time & Hysteresis Filtering.
+   * Prevents 15-second state flapping while ensuring state stability unless significant momentum shifts occur.
+   * Exposes archetypeDwellCount and logs archetype transitions.
+   */
+  detectArchetypeAndNarrative(match, gpiHome, gpiAway, dpiHome, dpiAway, igpHome, igpAway, pace, d5, d10, periodInfo, lgv = null, ccsm = null, gri = null, pce = null, hlov = null) {
+    const raw = this.evaluateRawArchetype(match, gpiHome, gpiAway, dpiHome, dpiAway, igpHome, igpAway, pace, d5, d10, periodInfo, lgv, ccsm, gri, pce, hlov);
+
+    const matchId = match?.matchId || match?.id;
+    if (!matchId) {
+      return {
+        archetype: raw.archetype,
+        archetypeLabel: raw.archetypeLabel,
+        narrative: raw.narrative,
+        archetypeDwellCount: 1
+      };
+    }
+
+    const min = match.minute || 0;
+    const scoreH = match.home?.score || 0;
+    const scoreA = match.away?.score || 0;
+    const hReds = Math.max(match.home?.redCards || 0, match.home?.stats?.redCards || 0);
+    const aReds = Math.max(match.away?.redCards || 0, match.away?.stats?.redCards || 0);
+    const totalReds = hReds + aReds;
+    const now = Date.now();
+
+    // Clean up stale states if cache gets too large
+    if (this.archetypeStates.size > 300) {
+      const staleCutoff = now - 7200000; // 2 hours
+      for (const [k, v] of this.archetypeStates.entries()) {
+        if (v.lastSeenAt < staleCutoff) this.archetypeStates.delete(k);
+      }
+    }
+
+    let currentState = this.archetypeStates.get(matchId);
+
+    // Initial evaluation for this match
+    if (!currentState) {
+      currentState = {
+        archetype: raw.archetype,
+        archetypeLabel: raw.archetypeLabel,
+        narrative: raw.narrative,
+        dwellCount: 1,
+        firstSeenAt: now,
+        lastSeenAt: now,
+        lastMinute: min,
+        lastScoreH: scoreH,
+        lastScoreA: scoreA,
+        lastTotalReds: totalReds,
+        lastStatus: match.status,
+        lastIgpHome: igpHome,
+        lastIgpAway: igpAway,
+        pendingCandidate: null,
+        pendingCandidateCount: 0
+      };
+      this.archetypeStates.set(matchId, currentState);
+      console.log(`[MatchMomentumEngine] Initial archetype [${matchId}] ${match.home?.name || 'Home'} vs ${match.away?.name || 'Away'}: ${raw.archetype} (${raw.archetypeLabel})`);
+      return {
+        archetype: currentState.archetype,
+        archetypeLabel: currentState.archetypeLabel,
+        narrative: currentState.narrative,
+        archetypeDwellCount: currentState.dwellCount
+      };
+    }
+
+    // Candidate matches current archetype: increment dwell count and update dynamic stats
+    if (raw.archetype === currentState.archetype) {
+      currentState.dwellCount += 1;
+      currentState.lastSeenAt = now;
+      currentState.lastMinute = min;
+      currentState.lastScoreH = scoreH;
+      currentState.lastScoreA = scoreA;
+      currentState.lastTotalReds = totalReds;
+      currentState.lastStatus = match.status;
+      currentState.lastIgpHome = igpHome;
+      currentState.lastIgpAway = igpAway;
+      currentState.archetypeLabel = raw.archetypeLabel;
+      currentState.narrative = raw.narrative;
+      currentState.pendingCandidate = null;
+      currentState.pendingCandidateCount = 0;
+
+      return {
+        archetype: currentState.archetype,
+        archetypeLabel: currentState.archetypeLabel,
+        narrative: currentState.narrative,
+        archetypeDwellCount: currentState.dwellCount
+      };
+    }
+
+    // Candidate is different from current archetype: evaluate hysteresis vs significant momentum shifts
+    const isStatusPhaseShift = (match.status !== currentState.lastStatus) ||
+      (raw.archetype === 'MATCH_COMPLETED') ||
+      (raw.archetype === 'STOPPAGE_TIME') ||
+      (raw.archetype === 'PRE_MATCH');
+    const isGoalScored = (scoreH !== currentState.lastScoreH) || (scoreA !== currentState.lastScoreA);
+    const isRedCardShift = (totalReds !== currentState.lastTotalReds);
+    const isLateGameLock = (min >= 75 && raw.archetype === 'LATE_GAME_LOCK');
+    const isLateGameVolatility = raw.archetype.startsWith('LATE_GAME_VOLATILITY');
+    const isAcuteIgpShift = (Math.abs(igpHome - currentState.lastIgpHome) >= 15) || (Math.abs(igpAway - currentState.lastIgpAway) >= 15);
+    const isBaselineBreakout = (currentState.archetype === 'MONITORING' || currentState.archetype === 'LIMITED_DATA' || currentState.archetype === 'PRE_MATCH');
+
+    const isSignificantShift = isStatusPhaseShift || isGoalScored || isRedCardShift || isLateGameLock || isLateGameVolatility || isAcuteIgpShift || isBaselineBreakout;
+
+    if (isSignificantShift) {
+      const prevArchetype = currentState.archetype;
+      const prevDwell = currentState.dwellCount;
+
+      currentState.archetype = raw.archetype;
+      currentState.archetypeLabel = raw.archetypeLabel;
+      currentState.narrative = raw.narrative;
+      currentState.dwellCount = 1;
+      currentState.firstSeenAt = now;
+      currentState.lastSeenAt = now;
+      currentState.lastMinute = min;
+      currentState.lastScoreH = scoreH;
+      currentState.lastScoreA = scoreA;
+      currentState.lastTotalReds = totalReds;
+      currentState.lastStatus = match.status;
+      currentState.lastIgpHome = igpHome;
+      currentState.lastIgpAway = igpAway;
+      currentState.pendingCandidate = null;
+      currentState.pendingCandidateCount = 0;
+
+      console.log(`[MatchMomentumEngine] Archetype transition (significant shift) [${matchId}] ${match.home?.name || 'Home'} vs ${match.away?.name || 'Away'}: ${prevArchetype} -> ${raw.archetype} (previous dwelled ${prevDwell} cycles)`);
+
+      return {
+        archetype: currentState.archetype,
+        archetypeLabel: currentState.archetypeLabel,
+        narrative: currentState.narrative,
+        archetypeDwellCount: currentState.dwellCount
+      };
+    }
+
+    // No significant shift: candidate must persist across REQUIRED_TICKS to prevent 15-second flapping
+    const REQUIRED_TICKS = 2;
+    if (currentState.pendingCandidate === raw.archetype) {
+      currentState.pendingCandidateCount += 1;
+    } else {
+      currentState.pendingCandidate = raw.archetype;
+      currentState.pendingCandidateCount = 1;
+    }
+
+    if (currentState.pendingCandidateCount >= REQUIRED_TICKS) {
+      // Candidate persisted across consecutive cycles: commit transition
+      const prevArchetype = currentState.archetype;
+      const prevDwell = currentState.dwellCount;
+
+      currentState.archetype = raw.archetype;
+      currentState.archetypeLabel = raw.archetypeLabel;
+      currentState.narrative = raw.narrative;
+      currentState.dwellCount = 1;
+      currentState.firstSeenAt = now;
+      currentState.lastSeenAt = now;
+      currentState.lastMinute = min;
+      currentState.lastScoreH = scoreH;
+      currentState.lastScoreA = scoreA;
+      currentState.lastTotalReds = totalReds;
+      currentState.lastStatus = match.status;
+      currentState.lastIgpHome = igpHome;
+      currentState.lastIgpAway = igpAway;
+      currentState.pendingCandidate = null;
+      currentState.pendingCandidateCount = 0;
+
+      console.log(`[MatchMomentumEngine] Archetype transition (dwell confirmed ${REQUIRED_TICKS} cycles) [${matchId}] ${match.home?.name || 'Home'} vs ${match.away?.name || 'Away'}: ${prevArchetype} -> ${raw.archetype} (previous dwelled ${prevDwell} cycles)`);
+
+      return {
+        archetype: currentState.archetype,
+        archetypeLabel: currentState.archetypeLabel,
+        narrative: currentState.narrative,
+        archetypeDwellCount: currentState.dwellCount
+      };
+    }
+
+    // Suppress flapping: retain existing archetype and increment dwell count
+    currentState.dwellCount += 1;
+    currentState.lastSeenAt = now;
+    currentState.lastMinute = min;
+    currentState.lastIgpHome = igpHome;
+    currentState.lastIgpAway = igpAway;
+
+    return {
+      archetype: currentState.archetype,
+      archetypeLabel: currentState.archetypeLabel,
+      narrative: currentState.narrative,
+      archetypeDwellCount: currentState.dwellCount
     };
   }
 
@@ -1372,8 +1602,8 @@ class MatchMomentumEngine {
 
     const xgH = this.estimateTeamXg(hS, aS);
     const xgA = this.estimateTeamXg(aS, hS);
-    const boxH = hS.shotsInsideBox || Math.round(0.62 * (hS.shotsOnTarget || 0) + 0.35 * (hS.corners || 0));
-    const boxA = aS.shotsInsideBox || Math.round(0.62 * (aS.shotsOnTarget || 0) + 0.35 * (aS.corners || 0));
+    const boxH = hS.shotsInsideBox != null ? hS.shotsInsideBox : Math.round(0.68 * (hS.shotsOnTarget || 0));
+    const boxA = aS.shotsInsideBox != null ? aS.shotsInsideBox : Math.round(0.68 * (aS.shotsOnTarget || 0));
     const bcTot = (hS.bigChances || 0) + (aS.bigChances || 0);
     const woodTot = (hS.woodwork || 0) + (aS.woodwork || 0);
     const hdiH = this.computeHighDangerIndex(hS);
@@ -1887,7 +2117,7 @@ class MatchMomentumEngine {
     const lgv = this.evaluateLateGameVolatility(match, d5, d10, gpiHome, gpiAway, igpHome, igpAway);
 
     const pace = this.classifyMatchPace(d10.home, d10.away, hStats, aStats, minute, gpiHome, gpiAway, match.home?.score || 0, match.away?.score || 0, pceHome, pceAway);
-    const { archetype, archetypeLabel, narrative } = this.detectArchetypeAndNarrative(
+    const { archetype, archetypeLabel, narrative, archetypeDwellCount } = this.detectArchetypeAndNarrative(
       match, gpiHome, gpiAway, dpiHome, dpiAway, igpHome, igpAway, pace, d5, d10, periodInfo, lgv, { home: ccsmHome, away: ccsmAway }, { home: griHome, away: griAway }, { home: pceHome, away: pceAway }, { home: hlovHome, away: hlovAway }
     );
     const evidenceFactors = this.buildEvidenceFactors(
@@ -1927,6 +2157,7 @@ class MatchMomentumEngine {
       archetype,
       archetypeLabel,
       narrative,
+      archetypeDwellCount,
       evidenceFactors
     };
   }

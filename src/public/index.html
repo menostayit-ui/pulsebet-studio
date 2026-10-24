@@ -656,6 +656,14 @@
           <span class="rkpi-label" data-i18n="rkpi_rate">BAŞARI ORANI</span>
           <strong class="rkpi-val" id="rkpiRate">%0</strong>
         </div>
+        <div class="rkpi-card roi">
+          <span class="rkpi-label" data-i18n="metric_roi_yield">ROI / GETİRİ</span>
+          <strong class="rkpi-val" id="rkpiRoi">%0</strong>
+        </div>
+        <div class="rkpi-card brier">
+          <span class="rkpi-label" data-i18n="metric_brier_score">BRİER SKORU</span>
+          <strong class="rkpi-val" id="rkpiBrier">-</strong>
+        </div>
       </div>
 
       <!-- Tracked Signals Ledger Section -->
@@ -667,6 +675,8 @@
             <button class="rl-tab" data-rfilter="PENDING" data-i18n="ledger_filter_pending">Aktif</button>
             <button class="rl-tab" data-rfilter="WON" data-i18n="ledger_filter_won">Tutanlar</button>
             <button class="rl-tab" data-rfilter="LOST" data-i18n="ledger_filter_lost">Tutmayanlar</button>
+            <button class="rl-tab" data-rfilter="UNDER_REVIEW" data-i18n="badge_under_review">İncelemede</button>
+            <button class="rl-tab" data-rfilter="INVALIDATED" data-i18n="badge_invalidated">Geçersiz</button>
           </div>
         </div>
         <div class="bento-grid" id="radarLedgerGrid">

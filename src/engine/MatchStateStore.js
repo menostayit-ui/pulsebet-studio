@@ -203,6 +203,10 @@ class MatchStateStore {
         ? (matchMinDelta >= 1 ? matchMinDelta : Math.min(1.0, Math.max(0.5, (now - prevSnap.ts) / 60000)))
         : 0;
 
+      const coverage = Math.min(1.0, elapsedMatchMins / windowMins);
+      const windowConfidence = Number(coverage.toFixed(2));
+      const unobservedShare = coverage < 1.0 ? Math.max(0, 1.0 - coverage) : 0;
+
       const keys = [
         'totalShots', 'shotsOnTarget', 'shotsOffTarget', 'blockedShots',
         'shotsInsideBox', 'bigChances', 'woodwork', 'corners', 'fouls',
@@ -210,22 +214,44 @@ class MatchStateStore {
         'touchesInBox', 'xg'
       ];
       const out = {};
+      const observedDelta = {};
+      const estimatedRate = {};
 
       for (const k of keys) {
         const cVal = curr[k] || 0;
-        if (prevStats && elapsedMatchMins >= 1.0) {
-          const rawDelta = Math.max(0, cVal - (prevStats[k] || 0));
+        const pVal = prevStats ? (prevStats[k] || 0) : 0;
+        const rawDelta = prevStats ? Math.max(0, cVal - pVal) : 0;
+        const rateEst = (cVal / minNow) * windowMins;
+
+        observedDelta[k] = rawDelta;
+        estimatedRate[k] = Number(rateEst.toFixed(2));
+
+        if (coverage >= 1.0) {
+          // Fully observed window: scale observed delta if elapsed > windowMins, strictly NO rate estimation blending
           const scaled = rawDelta * (windowMins / Math.max(windowMins, elapsedMatchMins));
-          // Partially observed window: blend observed delta with match-average pace for the unobserved remainder
-          const unobservedShare = Math.max(0, 1 - elapsedMatchMins / windowMins);
-          const rateEst = (cVal / minNow) * windowMins;
-          out[k] = Number((scaled + rateEst * unobservedShare).toFixed(2));
+          out[k] = Number(scaled.toFixed(2));
         } else {
-          const immediateDelta = prevStats ? Math.max(0, cVal - (prevStats[k] || 0)) : 0;
-          const rateEst = (cVal / minNow) * windowMins;
-          out[k] = Number(Math.max(immediateDelta, rateEst).toFixed(2));
+          // Partially observed or cold start: blend observed delta with match-average rate estimate ONLY for unobserved share
+          const scaled = prevStats ? rawDelta * (windowMins / Math.max(windowMins, elapsedMatchMins || windowMins)) : 0;
+          out[k] = Number((scaled + rateEst * unobservedShare).toFixed(2));
         }
       }
+
+      const meta = {
+        coverage,
+        observedDelta,
+        estimatedRate,
+        windowConfidence,
+        elapsedMatchMins
+      };
+
+      out._meta = meta;
+      out.coverage = coverage;
+      out.windowConfidence = windowConfidence;
+      out.elapsedMatchMins = elapsedMatchMins;
+      out.observedDelta = observedDelta;
+      out.estimatedRate = estimatedRate;
+
       return out;
     };
 
@@ -242,9 +268,10 @@ class MatchStateStore {
   }
 
   /**
-   * Evaluate all tracked signals for a given match in real time (WON / LOST / PENDING)
-   * Ensures any unsafe/filtered signals (requiring 2+ goals at trigger time for Over)
-   * are purged and settled cleanly without polluting history or ledger.
+   * Evaluate all tracked signals for a given match in real time (WON / LOST / PENDING / UNDER_REVIEW / INVALIDATED)
+   * Preserves historical signals in the ledger and history without deletion.
+   * If an Over signal was discovered to have been placed on an unsafe state (isFilteredUnsafeOver),
+   * it is marked INVALIDATED.
    */
   settleSignalsForMatch(match) {
     if (!match) return false;
@@ -252,7 +279,7 @@ class MatchStateStore {
     const linkedIdValues = new Set([match.matchId, ...Object.values(match.linkedIds || {})]);
 
     // Safety Gatekeeper: Skoru ne olursa olsun (veya 1-1 iken), tetiklenme anında 2+ gol gereken
-    // filtreli/hatalı Üst sinyallerini ledger ve history'den temizle
+    // filtreli/hatalı Üst sinyallerini silmek yerine INVALIDATED olarak işaretle
     const isFilteredUnsafeOver = (sel, trigTot, line) => {
       if (!sel || !sel.includes('Üst')) return false;
       let l = line;
@@ -264,43 +291,38 @@ class MatchStateStore {
       return needed >= 2;
     };
 
-    const prevLedgerLen = this.signalLedger.length;
-    this.signalLedger = this.signalLedger.filter(rec => {
-      const trigTot = rec.triggerTotalGoals ?? ((rec.triggerScoreHome || 0) + (rec.triggerScoreAway || 0));
-      return !isFilteredUnsafeOver(rec.selection, trigTot, rec.line);
-    });
-
-    const prevHistoryLen = this.signalHistory.length;
-    this.signalHistory = this.signalHistory.filter(sig => {
-      const trigTot = (sig.homeScore !== undefined && sig.awayScore !== undefined)
-        ? (sig.homeScore + sig.awayScore)
-        : ((sig.triggerScoreHome || 0) + (sig.triggerScoreAway || 0));
-      const sel = sig.signal?.selection || sig.title || '';
-      return !isFilteredUnsafeOver(sel, trigTot, sig.signal?.line);
-    });
-
-    if (this.signalLedger.length !== prevLedgerLen || this.signalHistory.length !== prevHistoryLen) {
-      changed = true;
-    }
-
     for (const rec of this.signalLedger) {
       if (linkedIdValues.has(rec.matchId)) {
         rec.matchId = match.matchId;
-        const prevStatus = rec.settlementStatus;
-        const prevBadge = rec.settlementBadge;
-        this.settlementEngine.evaluateSignal(rec, match);
-        if (rec.settlementStatus !== prevStatus || rec.settlementBadge !== prevBadge) {
-          changed = true;
+        const trigTot = rec.triggerTotalGoals ?? ((rec.triggerScoreHome || 0) + (rec.triggerScoreAway || 0));
+
+        if (isFilteredUnsafeOver(rec.selection, trigTot, rec.line)) {
+          if (rec.settlementStatus !== 'INVALIDATED') {
+            rec.settlementStatus = 'INVALIDATED';
+            rec.settlementBadge = 'GEÇERSİZ KILINDI';
+            rec.settlementDetail = 'Kazanmak için 2+ gol gereken filtre kuralı nedeniyle geçersiz';
+            changed = true;
+          }
+        } else {
+          const prevStatus = rec.settlementStatus;
+          const prevBadge = rec.settlementBadge;
+          this.settlementEngine.evaluateSignal(rec, match);
+          if (rec.settlementStatus !== prevStatus || rec.settlementBadge !== prevBadge) {
+            changed = true;
+          }
         }
       }
     }
 
-    // Sync settlement status onto signalHistory notifications as well
+    // Sync settlement status onto signalHistory notifications as well (never deleting historical signals)
     for (const sig of this.signalHistory) {
       if (linkedIdValues.has(sig.matchId)) {
         sig.matchId = match.matchId;
         const ledgerItem = this.signalLedger.find(r => r.id === sig.id || (r.matchId === sig.matchId && r.selection === sig.signal?.selection));
         if (ledgerItem) {
+          if (sig.settlementStatus !== ledgerItem.settlementStatus || sig.settlementBadge !== ledgerItem.settlementBadge) {
+            changed = true;
+          }
           sig.settlementStatus = ledgerItem.settlementStatus;
           sig.settlementBadge = ledgerItem.settlementBadge;
           sig.settlementDetail = ledgerItem.settlementDetail;
@@ -308,6 +330,19 @@ class MatchStateStore {
           sig.currentScoreAway = ledgerItem.currentScoreAway;
           sig.currentMinute = ledgerItem.currentMinute;
           sig.matchStatus = ledgerItem.matchStatus;
+        } else {
+          const trigTot = (sig.homeScore !== undefined && sig.awayScore !== undefined)
+            ? (sig.homeScore + sig.awayScore)
+            : ((sig.triggerScoreHome || 0) + (sig.triggerScoreAway || 0));
+          const sel = sig.signal?.selection || sig.title || '';
+          if (isFilteredUnsafeOver(sel, trigTot, sig.signal?.line)) {
+            if (sig.settlementStatus !== 'INVALIDATED') {
+              sig.settlementStatus = 'INVALIDATED';
+              sig.settlementBadge = 'GEÇERSİZ KILINDI';
+              sig.settlementDetail = 'Kazanmak için 2+ gol gereken filtre kuralı nedeniyle geçersiz';
+              changed = true;
+            }
+          }
         }
       }
     }

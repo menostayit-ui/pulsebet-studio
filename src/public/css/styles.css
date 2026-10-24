@@ -2964,8 +2964,18 @@ body {
   box-shadow: inset 0 0 0 1px rgba(244, 63, 94, 0.12), var(--shadow-xs);
 }
 .notif-card.signal-card.sig-pending {
-  border-left: 2px solid var(--amber) !important;
+  border-left: 2px solid #06b6d4 !important;
   background: var(--bg-card);
+}
+.notif-card.signal-card.sig-review {
+  border-left: 2px solid var(--amber) !important;
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.08) 0%, var(--bg-card) 100%);
+  box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.12), var(--shadow-xs);
+}
+.notif-card.signal-card.sig-invalidated {
+  border-left: 2px solid #94a3b8 !important;
+  background: var(--bg-card);
+  opacity: 0.85;
 }
 
 .nc-top {
@@ -3059,9 +3069,19 @@ body {
   color: #ffffff;
 }
 .sig-outcome-badge.pending {
+  background: rgba(6, 182, 212, 0.18);
+  color: #06b6d4;
+  border: 1px solid rgba(6, 182, 212, 0.35);
+}
+.sig-outcome-badge.review {
   background: var(--amber-soft);
   color: var(--amber);
-  border: 1px solid rgba(217, 119, 6, 0.35);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+}
+.sig-outcome-badge.invalidated {
+  background: rgba(148, 163, 184, 0.15);
+  color: #94a3b8;
+  border: 1px solid rgba(148, 163, 184, 0.3);
 }
 
 .nc-dismiss-btn {
@@ -3149,6 +3169,62 @@ body {
   border-radius: 5px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+.nc-prob-badge {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  background: rgba(16, 185, 129, 0.12);
+  color: var(--emerald-bright);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  padding: 2.5px 7px;
+  border-radius: 5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.nc-conv-badge {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  background: rgba(99, 102, 241, 0.12);
+  color: var(--brand-bright);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  padding: 2.5px 7px;
+  border-radius: 5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.nc-edge-badge {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  background: rgba(6, 182, 212, 0.12);
+  color: #06b6d4;
+  border: 1px solid rgba(6, 182, 212, 0.25);
+  padding: 2.5px 7px;
+  border-radius: 5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.nc-sig-tag.sig-type-value {
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--emerald-bright);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+.nc-sig-tag.sig-type-model {
+  background: rgba(99, 102, 241, 0.15);
+  color: var(--brand-bright);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+}
+.ss-badge.sig-type-value {
+  background: rgba(16, 185, 129, 0.18);
+  color: var(--emerald-bright);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+}
+.ss-badge.sig-type-model {
+  background: rgba(99, 102, 241, 0.18);
+  color: var(--brand-bright);
+  border: 1px solid rgba(99, 102, 241, 0.35);
 }
 
 .nc-trigger-meta {
@@ -3343,7 +3419,7 @@ body {
 /* Radar Scoreboard KPI Banner */
 .radar-kpi-banner {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
   gap: 12px;
 }
 .rkpi-card {
@@ -3358,8 +3434,10 @@ body {
 }
 .rkpi-card.won { border-left: 2px solid var(--emerald-bright); box-shadow: inset 0 0 0 1px rgba(16, 185, 129, 0.15), var(--shadow-xs); }
 .rkpi-card.lost { border-left: 2px solid var(--rose); box-shadow: inset 0 0 0 1px rgba(244, 63, 94, 0.12), var(--shadow-xs); }
-.rkpi-card.pending { border-left: 2px solid var(--amber); box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.15), var(--shadow-xs); }
+.rkpi-card.pending { border-left: 2px solid #06b6d4; box-shadow: inset 0 0 0 1px rgba(6, 182, 212, 0.15), var(--shadow-xs); }
 .rkpi-card.rate { border-left: 2px solid var(--brand); box-shadow: inset 0 0 0 1px rgba(99, 102, 241, 0.15), var(--shadow-xs); }
+.rkpi-card.roi { border-left: 2px solid var(--emerald-bright); box-shadow: inset 0 0 0 1px rgba(16, 185, 129, 0.15), var(--shadow-xs); }
+.rkpi-card.brier { border-left: 2px solid #8b5cf6; box-shadow: inset 0 0 0 1px rgba(139, 92, 246, 0.15), var(--shadow-xs); }
 
 .rkpi-label {
   font-size: 10px;
@@ -3377,8 +3455,10 @@ body {
 }
 .rkpi-card.won .rkpi-val { color: var(--emerald-bright); }
 .rkpi-card.lost .rkpi-val { color: var(--rose); }
-.rkpi-card.pending .rkpi-val { color: var(--amber); }
+.rkpi-card.pending .rkpi-val { color: #06b6d4; }
 .rkpi-card.rate .rkpi-val { color: var(--brand-bright); }
+.rkpi-card.roi .rkpi-val { color: var(--emerald-bright); }
+.rkpi-card.brier .rkpi-val { color: #a78bfa; }
 
 .radar-section-block {
   display: flex;
@@ -3451,16 +3531,25 @@ body {
 }
 .bento-match-card.has-signal,
 .bento-match-card.sig-won {
-  border-color: rgba(16, 185, 129, 0.3);
+  border-color: rgba(16, 185, 129, 0.35);
   box-shadow: inset 0 0 0 1px rgba(16, 185, 129, 0.2), var(--shadow-xs);
 }
 .bento-match-card.sig-lost {
-  border-color: rgba(244, 63, 94, 0.3);
+  border-color: rgba(244, 63, 94, 0.35);
   box-shadow: inset 0 0 0 1px rgba(244, 63, 94, 0.15), var(--shadow-xs);
 }
 .bento-match-card.sig-pending {
-  border-color: rgba(245, 158, 11, 0.3);
+  border-color: rgba(6, 182, 212, 0.35);
+  box-shadow: inset 0 0 0 1px rgba(6, 182, 212, 0.15), var(--shadow-xs);
+}
+.bento-match-card.sig-review {
+  border-color: rgba(245, 158, 11, 0.35);
   box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.15), var(--shadow-xs);
+}
+.bento-match-card.sig-invalidated {
+  border-color: rgba(148, 163, 184, 0.3);
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.15), var(--shadow-xs);
+  opacity: 0.85;
 }
 
 .bmc-top {

@@ -198,6 +198,18 @@
       strong_signal: 'GÜÇLÜ SİNYAL',
       value_signal: 'DEĞER SİNYALİ',
 
+      // Separated Quantitative Metrics & Badges
+      metric_model_prob: 'Model Olasılığı',
+      metric_conviction_index: 'İkna Skoru',
+      metric_market_edge: 'Piyasa Avantajı',
+      metric_roi_yield: 'ROI / Getiri',
+      metric_brier_score: 'Brier Skoru',
+      badge_under_review: 'İNCELEMEDE',
+      badge_invalidated: 'GEÇERSİZ',
+      badge_value_signal: 'DEĞER SİNYALİ',
+      badge_model_signal: 'MODEL TAHMİNİ',
+      model_uncalibrated: 'Henüz doğrulanmadı',
+
       // Dedicated Views: Favorites & Radar
       fav_eyebrow: 'KİŞİSEL İZLEME LİSTENİZ',
       fav_title: 'Favori Maçlarım',
@@ -449,6 +461,18 @@
       elite_signal: 'ELITE SIGNAL',
       strong_signal: 'STRONG SIGNAL',
       value_signal: 'VALUE SIGNAL',
+
+      // Separated Quantitative Metrics & Badges
+      metric_model_prob: 'Model Win Prob',
+      metric_conviction_index: 'Conviction Score',
+      metric_market_edge: 'Market Edge',
+      metric_roi_yield: 'ROI / Yield',
+      metric_brier_score: 'Brier Score',
+      badge_under_review: 'UNDER REVIEW',
+      badge_invalidated: 'INVALIDATED',
+      badge_value_signal: 'VALUE BET',
+      badge_model_signal: 'MODEL FORECAST',
+      model_uncalibrated: 'Not yet calibrated',
 
       // Dedicated Views: Favorites & Radar
       fav_eyebrow: 'YOUR PERSONAL WATCHLIST',
